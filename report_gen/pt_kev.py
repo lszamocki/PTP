@@ -68,7 +68,10 @@ def insert_kev_table(doc, db, kev_tag):
         if ele['KEV']:        
             for item in kevs:
                 if item['id'] in ele['KEV']:
-                    item['findings'].append(ele['uploaded_finding_name'])
+                    if ele['duplicate_finding_order'] > 0:
+                        item['findings'].append(ele['uploaded_finding_name'] + " " + str(ele['duplicate_finding_order']))
+                    else:
+                        item['findings'].append(ele['uploaded_finding_name'])
 
     kev_list = sorted(kevs, key=lambda d: d['cve']) 
 

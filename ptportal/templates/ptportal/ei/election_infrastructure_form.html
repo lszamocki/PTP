@@ -36,14 +36,69 @@ DM22-1011
         border-top:1px solid black!important;
         border-color:#1b1c1d!important;
     }
+    .warningcard {
+        width: 100%;
+        font-size: 10pt;
+        background-color: #FFE3CB;
+        padding: 15px;
+        border: 2px solid #F79322;
+        text-align: left;
+        overflow: auto;
+    }
+    .warningcard img {
+        float: left;
+        padding: 2px;
+    }
+    .warningcard p {
+        padding: 0px 30px;
+    }
 </style>
 {% endblock %}
 
 {% block content %}
-<form @submit="submitEI" class="block">
-
 {% csrf_token %}
 
+{% if missing_ei %}
+  <div class="warningcard">
+    <img class="w-8 h-8" src="/static/icons/triangle-exclamation-solid.svg">
+    <p><b>Warning:</b> The Election Infrastructure Questionnaire has not been completed.</p>
+  </div>
+  <br>
+{% endif %}
+
+{% if not systems %}
+  <div class="warningcard">
+    <img class="w-8 h-8" src="/static/icons/triangle-exclamation-solid.svg">
+    <p><b>Warning:</b> No Election Infrastructure systems have been added.</p>
+  </div>
+  <br>
+{% endif %}
+
+{% if systems_missing %}
+  <div class="warningcard">
+    <img class="w-8 h-8" src="/static/icons/triangle-exclamation-solid.svg">
+    <p><b>Warning:</b> The following election systems are missing one or more values: {{systems_missing}}</p>
+  </div>
+  <br>
+{% endif %}
+
+{% if no_answer %}
+  <div class="warningcard">
+    <img class="w-8 h-8" src="/static/icons/triangle-exclamation-solid.svg">
+    <p><b>Warning:</b> The following questions do not have answers: {{no_answer}}</p>
+  </div>
+  <br>
+{% endif %}
+
+{% if to_be_determined %}
+  <div class="warningcard">
+    <img class="w-8 h-8" src="/static/icons/triangle-exclamation-solid.svg">
+    <p><b>Warning:</b> The following questions are marked 'To Be Determined': {{to_be_determined}}</p>
+  </div>
+  <br>
+{% endif %}
+
+<form @submit="submitEI" class="block">
 <div class="col-span-5 mb-5">
     <sds-section class="col-span-5" type="accented">
         <span class="border-top border-dark"></span>

@@ -26,6 +26,15 @@ class DataExfiltration(generic.base.TemplateView):
     def get_context_data(self, **kwargs):
         context = {}
         context['data_exfil'] = DataExfil.objects.all().order_by('order')
+
+        missing = []
+
+        for d in context['data_exfil']:
+            if d.protocol == "" or d.datatype == "" or d.date_time == None:
+                missing.append(str(d.order))
+
+        context['missing'] = ', '.join(missing)
+
         return context
 
     def post(self, request, *args, **kwargs):

@@ -120,6 +120,30 @@ class EngagementMeta(abstract_models.TimeStampedModel):
         ('Water and Wastewater Systems', 'Water and Wastewater Systems'),
     )
 
+    CI_SUBSECTOR_CHOICES = (
+        ('Entertainment and Media', 'Entertainment and Media'),
+        ('Gaming', 'Gaming'),
+        ('Lodging', 'Lodging'),
+        ('Outdoor Events', 'Outdoor Events'),
+        ('Public Assembly', 'Public Assembly'),
+        ('Real Estate', 'Real Estate'),
+        ('Retail', 'Retail'),
+        ('Sports Leagues', 'Sports Leagues'),
+        ('Electricity', 'Electricity'),
+        ('Oil and Natural Gas', 'Oil and Natural Gas'),
+        ('Education Facilities', 'Education Facilities'),
+        ('Election Infrastructure', 'Election Infrastructure'),
+        ('National Monuments and Icons', 'National Monuments and Icons'),
+        ('Aviation', 'Aviation'),
+        ('Freight Rail', 'Freight Rail'),
+        ('Highway and Motor Carrier', 'Highway and Motor Carrier'),
+        ('Maritime', 'Maritime'),
+        ('Mass Transit and Passenger Rail', 'Mass Transit and Passenger Rail'),
+        ('Pipeline', 'Pipeline'),
+        ('Postal and Shipping', 'Postal and Shipping'),
+        ('N/A', 'N/A'),
+    )
+
     STATE_CHOICES = (
         ('AK', 'Alaska'),
         ('AL', 'Alabama'),
@@ -183,13 +207,11 @@ class EngagementMeta(abstract_models.TimeStampedModel):
         max_length=8,
         validators=[
             RegexValidator(
-                regex="^[1-9]\d*[.]?\d{1,}$",
+                regex="^(?:[0-9]+){7}",
                 # regex rules:
-                # [1-9] any digit but 0
-                # \d* any digit including 0 - equivilent to [0-9]
-                # [.]? optional decimal/period
-                # \d{1,} any digit - {1,} is a quantifier - one or more digits
-                message="Please provide valid input: use only numeric values and ID cannot start with 0 or end with a period.",
+                # \d* any digit [0-9]
+                # {7} seven digits
+                message="Please provide a valid assessment ID. The ID should be a 7-digit numerical value.",
                 code="invalid_id",
             )
         ],
@@ -258,6 +280,13 @@ class EngagementMeta(abstract_models.TimeStampedModel):
         default="",
         verbose_name="Critical Infrastructure Type"
     )
+    customer_ci_subsector = models.CharField(
+        max_length=75,
+        blank=True,
+        choices=CI_SUBSECTOR_CHOICES,
+        default="",
+        verbose_name="Critical Infrastructure Subsector"
+    )
     customer_location = models.CharField(
         max_length=200,
         blank=True,
@@ -274,15 +303,6 @@ class EngagementMeta(abstract_models.TimeStampedModel):
         blank=True,
         validators=[EmailValidator()],
         verbose_name="Team Lead Email Address",
-    )
-    technical_lead_name = models.CharField(
-        max_length=50, blank=True, unique=True, verbose_name="Technical Lead Name"
-    )
-    technical_lead_email = models.EmailField(
-        max_length=50,
-        blank=True,
-        validators=[EmailValidator()],
-        verbose_name="Technical Lead Email Address",
     )
     business_goal = models.TextField(blank=True, verbose_name="Business Goal")
 

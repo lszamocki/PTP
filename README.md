@@ -34,7 +34,9 @@ This is a development version, so includes source code with docker images. In fu
         -   [Restore Online](#restore-online)
         -   [Back Up for Offline Restore](#backup-offline)
         -   [Restore Offline](#restore-offline)
+        -   [Automate Daily Backups](#daily-backups)
 -   [Other Functions](#other-functions)
+    -   [API](#api)
     -   [Create a Superuser](#create-superuser)
     -   [Change Password](#change-password)
     -   [Reset Login Attempts](#reset-attempts)
@@ -42,9 +44,11 @@ This is a development version, so includes source code with docker images. In fu
     -   [Connect to Shell](#connect-shell)
     -   [Pause](#pause)
     -   [Resume](#resume)
+    -   [Start](#start)
     -   [Tear Down](#tear-down)
 -   [Development Guide](#development-guide)
     -   [Setup (Development)](#development-setup)
+-   [Risk Score](#risk-score)
 -   [Help Templates](#help-templates)
 -   [Technical Constraints](#technical-constraints)
 -   [Troubleshooting](#troubleshooting)
@@ -66,7 +70,7 @@ Once `docker` is successfully installed, run the following command to verify tha
 ```bash
 > docker version
 ```
-    
+
 <a name='docker-compose'></a>
 
 ### Docker Compose
@@ -80,7 +84,7 @@ Once `docker compose` is successfully installed, run the following command to ve
 ```bash
 > docker compose version
 ```
-    
+
 <a name='python'></a>
 
 ### Python
@@ -110,27 +114,7 @@ Once `python` is successfully installed, run the following command to verify tha
 
 A python3 script ptp.py is included to automate various functions, including the set up, backup, restore, and tear down processes. In order to use the ptp.py script and set up RE, the following dependencies must be met (in addition to the prerequisites outlined in the previous section). Note that RE has only been tested with the following dependency versions and may not function correctly with other versions.
 
-#### Node v18.x.x and NPM v9.x.x
-
-Any alternate versions of Node and NPM that may be running on the system where RE is being installed could conflict with RE set up. For that reason, it is recommended to purge any existing versions of Node and NPM if they are not needed. The following command will install Node and NPM:
-
-```bash
-> curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | sudo gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg
-> NODE_MAJOR=18
-> echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_$NODE_MAJOR.x nodistro main" | sudo tee /etc/apt/sources.list.d/nodesource.list
-> apt-get update && apt-get install nodejs -y && apt-get install npm -y
-```
-
-Reboot system after installation.
-
-Verify `node` and `npm` versions by running the following commands:
-
-```bash
-> node --version
-> npm --version
-```
-
-#### Python3-Django v2.2.x
+#### Python3-Django v3.2.x
 
 The following command will install Python3-Django:
 
@@ -144,31 +128,9 @@ Verify `python3-django` version by running the following command:
 > python3 -m django --version
 ```
 
-#### TailwindCSS 3
-
-The following command should be run from the root of the RE directory and will install TailwindCSS 3 dependencies (requires that a valid version of `npm` already be installed) - note that this installation is performed when the `python3 ptp.py setup` command is run.
-
-```bash
-> npm install -D node/dependencies/tailwindcss-3 --legacy-peer-deps
-```
-
-#### Vue.js 3
-
-The following command should be run from the root of the RE directory and will install Vue.js 3 dependencies (requires that a valid version of `npm` already be installed) - note that this installation is performed when the `python3 ptp.py setup` command is run.
-
-```bash
-> npm install -D node/dependencies/components-vue3 --legacy-peer-deps
-```
-
 <a name='setup-production'></a>
 
 ### Setup (Production)
-
-The following command can be run from the root of the RE directory to install the TailwindCSS 3 and Vue.js 3 dependencies (if this has not already been done manually per the last section):
-
-```bash
-> python3 ptp.py setup
-```
 
 Once all prerequisites and dependencies are met, an instance of RE can be spun up by running the following command (be sure to specify the correct assessment type with the `-r` flag):
 
@@ -214,7 +176,7 @@ It is assumed that a copy of the assessment-reporting-engine directory (whether 
 
 ### Back Up for Offline Restore
 
-While the initial set up of RE involves internet connectivity, the application can be restored without internet connectivity (this requires the instance of RE being backed up to still be running normally). 
+While the initial set up of RE involves internet connectivity, the application can be restored without internet connectivity (this requires the instance of RE being backed up to still be running normally).
 
 This method involves a lot of overhead in terms of large files transferred between systems, so if internet connectivity is available on the system where RE is being restored, it is recommended to follow the [Back Up for Online Restore](#backup-online) and [Restore Online](#restore-online) steps:
 
@@ -225,7 +187,7 @@ This method involves a lot of overhead in terms of large files transferred betwe
 > docker save prod-db > db.tar
 ```
 
-The ***entire assessment-reporting-engine directory***, including the web/nginx/db TAR files and the backup ZIP file must be transferred to the new system due to various dependencies and files that were generated with internet connectivity, and which cannot be re-generated in the offline environment. This will fulfill the **TailwindCSS** and **Vue.js** requirements, however, ***the system where RE is being restored must already meet all other prerequisites and dependency requirements***.
+The web/nginx/db TAR files and the backup ZIP file must be transferred to the new system. ***The system where RE is being restored must meet all prerequisites and dependency requirements***.
 
 <a name='restore-offline'></a>
 
@@ -246,9 +208,57 @@ Once the above requirements are met, the following commands can be run from the 
 > python3 ptp.py restore -r [FAST/RPT/RVA] -b [/path/to/backup.zip] -c offline
 ```
 
+<a name='daily-backups'></a>
+
+### Automate Daily Backups
+
+It is strongly recommended to back up RE daily to avoid losing data if the instance breaks or is deleted. There are many ways to automate this, but an example using a `cron` job can be found below.
+
+1. If the `cron` service is not already running, execute the following command:
+```bash
+> /etc/init.d/cron start
+```
+
+2. Run the following command to add a new `cron` job:
+```bash
+> sudo crontab -e
+```
+
+3. Follow the terminal instructions to select an editor.
+
+4. Add the following line within the editor:
+```bash
+00 20 * * * cd /path/to/assessment-reporting-engine && sudo python3 ptp.py backup --no-password --cron >> backup-output.txt 2>&1
+```
+Note: This automates a backup at 20:00 (8:00 PM) on the local host each day. Be sure to modify the time according to the assessment needs and ensure that the file path is modified based on where `ptp.py` is located. Output from these daily backups will be stored in the `backup-output.txt` file in the same directory as `ptp.py` in case it needs to be referenced for troubleshooting.
+
+Users should validate that the daily backup is working properly and ensure a copy of the backup is moved to an alternate location (e.g., the share) in the event that there is a system failure.
+
 <a name='other-functions'></a>
 
 ## Other Functions
+
+<a name='api'></a>
+
+### API
+
+The following endpoints are available for use with the API:
+
+`/api/auth` - Token based authentication endpoint
+
+`/api/affected-systems/` - CRUD endpoint for affected system entries
+
+`/api/mitigations/` - CRUD endpoint for mitigation entries
+
+`/api/specific-findings/` - Read-only endpoint for specific findings
+
+`/api/uploaded-findings/` - CRUD endpoint for uploaded findings
+
+Documentation can be found by browsing to the respective endpoint while authenticated to the application. To generate a token for use of the API with external tools, you can do the following:
+
+```bash
+curl -X POST -d "username=[username]&password=[password]" https://[reporting-engine-ip]/api/auth
+```
 
 <a name='create-superuser'></a>
 
@@ -320,6 +330,16 @@ To resume a paused instance of Reporting Engine, run the following command:
 > python3 ptp.py resume
 ```
 
+<a name='start'></a>
+
+### Start
+
+To start all exited containers associated with Reporting Engine (e.g., in the event that the system rebooted), run the following command:
+
+```bash
+> python3 ptp.py start
+```
+
 <a name='tear-down'></a>
 
 ### Tear Down
@@ -355,6 +375,16 @@ The development instance of the application can be accessed at: http://localhost
 Superusers can access the admin interface by logging in and selecting their username from the account dropdown menu, then selecting **Admin**. Alternatively, the admin interface can be accessed at the following URL in development mode: http://localhost:8080/admin
 
 **Additional development information coming soon**
+
+<a name='risk-score'></a>
+
+## Risk Score
+
+The following files should be modified to adjust the risk scoring methodology:
+
+-   `assets/Penetration Testing Findings Repository 1.0.xlsx`: The default likelihood for each finding is established in the 'Likelihood' column for general and specific findings.
+-   `ptportal/models/findings.py`: The magnitude ranges are established in the `MAGNITUDE_CHOICES` variable in the `UploadedFinding` model. The risk score calculation is handled in the `save` function of the `UploadedFinding` model. The severity and magnitude mappings as well as the overall risk score formula can be established in the `save` function.
+-   `ptportal/templates/ptportal/risk_score.html`: The magnitude ranges in the `magnitude_options` variable should match those that were established in `ptportal/models/findings.py`.
 
 <a name='help-templates'></a>
 

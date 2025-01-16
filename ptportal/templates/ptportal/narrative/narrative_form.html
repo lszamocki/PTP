@@ -46,18 +46,63 @@ DM22-1011
     .space{
         padding: 4px;
     }
+    .warningcard {
+        width: 100%;
+        font-size: 10pt;
+        background-color: #FFE3CB;
+        padding: 15px;
+        border: 2px solid #F79322;
+        text-align: left;
+        overflow: auto;
+    }
+    .warningcard img {
+        float: left;
+        padding: 2px;
+    }
+    .warningcard p {
+        padding: 0px 30px;
+    }
+    .filters {
+        display:inline-block;
+        padding:2px;
+    }
+    .attack-description {
+        overflow-y: scroll;
+        max-height: 120px;
+    }
+    .right {
+        border:solid black;
+        border-width:0 2px 2px 0;
+        display:inline-block;
+        padding:3px;
+        transform: rotate(-45deg);
+        -webkit-transform: rotate(-45deg);
+    }
 </style>
 {% endblock %}
 
 {% block content %}
 {% csrf_token %}
 {% load static %}
+
+{% if missing %}
+    <div class="warningcard">
+        <img class="w-8 h-8" src="/static/icons/triangle-exclamation-solid.svg">
+        <p><b>Warning:</b> The following items are missing: {{missing}}</p>
+    </div>
+    <br>
+{% endif %}
+
 <div class="col-span-5">
 
-    <sds-section class="mb-4">
+    <sds-section class="mb-4" style="border:1px solid #DDDDDD;" type="simple">
+        {% if object %}
         <template #title>
-            <p>Download the <sds-link href="{% static 'templates/attack-path-template.pptx' %}" variant="primary"><b>Attack Path Template</b></sds-link> and follow the instructions in the document to construct/save your attack path diagram. Upload the attack path image file below.</p>
+            <sds-link href="../../" variant="primary">{{ breadcrumb }} Narratives</sds-link>&nbsp;&nbsp;<i class="arrow right"></i>&nbsp;&nbsp;&nbsp;{{ name }}
         </template>
+        {% endif %}
+        <p>Download the <sds-link href="{% static 'templates/attack-path-template.pptx' %}" variant="primary"><b>Attack Path Template</b></sds-link> and follow the instructions in the document to construct/save your attack path diagram. Upload the attack path image file below.</p>
+        <br>
         <sds-file-uploader v-bind="attackPathUploadArgs" @add="addFile">
         </sds-file-uploader>
     </sds-section>
@@ -70,7 +115,7 @@ DM22-1011
             <h4>Caption:</h4>
             <sds-button type="button" class="justify-self-end" @click="deleteFile(file)"><img class="w-8 h-8" src="/static/icons/trash-solid.svg"></sds-button>
         </div>
-        <sds-textarea v-model="file.caption" :rows="1" :maxlength="250"></sds-textarea>
+        <sds-input v-model="file.caption" :maxlength="250"></sds-input>
     </sds-section>
 
     <sds-section v-bind="toolSectionArgs" class="mb-4">
@@ -79,6 +124,13 @@ DM22-1011
         </template>
         <div class="grid place-items-center">
             <sds-search-box class="w-1/2 place-self-center" :disableSearch="true" variant="primary" placeholder="Search Term" v-model="toolSectionArgs.searchTerm" @update:model-value="filterTools(toolSectionArgs.searchTerm)"></sds-search-box>
+            <br>
+            <div style="text-align:center; width:90%">
+                <div v-if="toolFilters.all" class="filters">All | </div><div v-else class="filters"><sds-button style="color:#3C8ABB" @click="toggleTools('all')">All</sds-button> | </div>
+                <div v-if="toolFilters.selected" class="filters">Selected ([[formData.tools.length]]) | </div><div v-else class="filters"><sds-button style="color:#3C8ABB" @click="toggleTools('selected')">Selected ([[formData.tools.length]])</sds-button> | </div>
+                <div v-if="toolFilters.recommended" class="filters">Recommended ([[formData.recTools.length]])</div><div v-else class="filters"><sds-button style="color:#3C8ABB" @click="toggleTools('recommended')">Recommended ([[formData.recTools.length]])</sds-button></div>
+            </div>
+            <br>
             <sds-scroll-area class="px-4 pt-4 place-self-center h-80 w-11/12" id="toolList">
                 <div v-for="tool in toolSectionArgs.toolSearchList" :key="tool.fields.name" class="grid grid-cols-2 border-b border-slate-700 hover:bg-gray-700/[.1]">
                     <div class="py-2 px-4">
@@ -170,7 +222,29 @@ DM22-1011
         </template>
         <div class="grid place-items-center">
             <sds-search-box class="w-1/2 place-self-center" :disableSearch="true" variant="primary" placeholder="Search Term" v-model="attackSectionArgs.searchTerm" @update:model-value="filterTechniques(attackSectionArgs.searchTerm)"></sds-search-box>
-            <sds-scroll-area class="px-4 pt-4 place-self-center h-80 w-11/12">
+            <br>
+            <div style="text-align:center; width:90%">
+                <div v-if="techFilters.all" class="filters">All | </div><div v-else class="filters"><sds-button style="color:#3C8ABB" @click="toggleTechs('all')">All</sds-button> | </div>
+                <div v-if="techFilters.selected" class="filters">Selected ([[formData.techniques.length]]) | </div><div v-else class="filters"><sds-button style="color:#3C8ABB" @click="toggleTechs('selected')">Selected ([[formData.techniques.length]])</sds-button> | </div>
+                <div v-if="techFilters.recommended" class="filters">Recommended ([[formData.recTechs.length]]) | </div><div v-else class="filters"><sds-button style="color:#3C8ABB" @click="toggleTechs('recommended')">Recommended ([[formData.recTechs.length]])</sds-button> | </div>
+                <div v-if="techFilters.recon" class="filters">Reconnaissance | </div><div v-else class="filters"><sds-button style="color:#3C8ABB" @click="toggleTechs('recon', 'Reconnaissance')">Reconnaissance</sds-button> | </div>
+                <div v-if="techFilters.rd" class="filters">Resource Development | </div><div v-else class="filters"><sds-button style="color:#3C8ABB" @click="toggleTechs('rd', 'Resource Development')">Resource Development</sds-button> | </div>
+                <div v-if="techFilters.ia" class="filters">Initial Access | </div><div v-else class="filters"><sds-button style="color:#3C8ABB" @click="toggleTechs('ia', 'Initial Access')">Initial Access</sds-button> | </div>
+                <div v-if="techFilters.exe" class="filters">Execution | </div><div v-else class="filters"><sds-button style="color:#3C8ABB" @click="toggleTechs('exe', 'Execution')">Execution</sds-button> | </div>
+                <div v-if="techFilters.per" class="filters">Persistence | </div><div v-else class="filters"><sds-button style="color:#3C8ABB" @click="toggleTechs('per', 'Persistence')">Persistence</sds-button> | </div>
+                <div v-if="techFilters.pe" class="filters">Privilege Escalation | </div><div v-else class="filters"><sds-button style="color:#3C8ABB" @click="toggleTechs('pe', 'Privilege Escalation')">Privilege Escalation</sds-button> | </div>
+                <div v-if="techFilters.de" class="filters">Defense Evasion | </div><div v-else class="filters"><sds-button style="color:#3C8ABB" @click="toggleTechs('de', 'Defense Evasion')">Defense Evasion</sds-button> | </div>
+                <div v-if="techFilters.ca" class="filters">Credential Access | </div><div v-else class="filters"><sds-button style="color:#3C8ABB" @click="toggleTechs('ca', 'Credential Access')">Credential Access</sds-button> | </div>
+                <div v-if="techFilters.disc" class="filters">Discovery | </div><div v-else class="filters"><sds-button style="color:#3C8ABB" @click="toggleTechs('disc', 'Discovery')">Discovery</sds-button> | </div>
+                <div v-if="techFilters.lm" class="filters">Lateral Movement | </div><div v-else class="filters"><sds-button style="color:#3C8ABB" @click="toggleTechs('lm', 'Lateral Movement')">Lateral Movement</sds-button> | </div>
+                <div v-if="techFilters.col" class="filters">Collection | </div><div v-else class="filters"><sds-button style="color:#3C8ABB" @click="toggleTechs('col', 'Collection')">Collection</sds-button> | </div>
+                <div v-if="techFilters.cc" class="filters">Command and Control | </div><div v-else class="filters"><sds-button style="color:#3C8ABB" @click="toggleTechs('cc', 'Command and Control')">Command and Control</sds-button> | </div>
+                <div v-if="techFilters.exfil" class="filters">Exfiltration | </div><div v-else class="filters"><sds-button style="color:#3C8ABB" @click="toggleTechs('exfil', 'Exfiltration')">Exfiltration</sds-button> | </div>
+                <div v-if="techFilters.imp" class="filters">Impact | </div><div v-else class="filters"><sds-button style="color:#3C8ABB" @click="toggleTechs('imp', 'Impact')">Impact</sds-button> | </div>
+                <div v-if="techFilters.sub" class="filters">Sub-Techniques</div><div v-else class="filters"><sds-button style="color:#3C8ABB" @click="toggleTechs('sub')">Sub-Techniques</sds-button></div>
+            </div>
+            <br>
+            <sds-scroll-area class="px-4 pt-4 place-self-center w-11/12" style="height:800px">
                 <div v-for="technique in attackSectionArgs.attackSearchList" :key="technique.fields.t_id" :id="technique.fields.t_id" class="grid grid-cols-2 border-b border-slate-700 hover:bg-gray-700/[.1]">
                     <div class="py-2 px-4">
                         <div class="font-bold">
@@ -178,7 +252,7 @@ DM22-1011
                         <div>[[technique.fields.tactics]]</div>
                     </div>
                     <div class="py-2">
-                        [[technique.fields.description]]
+                        <p class="attack-description">[[technique.fields.description]]</p>
                     </div>
                 </div>
             </sds-scroll-area>
@@ -199,7 +273,34 @@ DM22-1011
                 deleteImage: false,
                 tools: [],
                 newTools: [],
-                techniques: []
+                techniques: [],
+                recTools: [],
+                recTechs: []
+            },
+            techFilters: {
+                all: true,
+                selected: false,
+                recommended: false,
+                recon: false,
+                rd: false,
+                ia: false,
+                exe: false,
+                per: false,
+                pe: false,
+                de: false,
+                ca: false,
+                disc: false,
+                lm: false,
+                col: false,
+                cc: false,
+                exfil: false,
+                imp: false,
+                sub: false
+            },
+            toolFilters: {
+                all: true,
+                selected: false,
+                recommended: false
             },
             fileList: [],
             attackPathUploadArgs: {
@@ -263,6 +364,18 @@ DM22-1011
 
         {% endfor %}
 
+        {% for i in recommended_tools %}
+
+            pageData.formData.recTools.push("{{i|escapejs}}")
+
+        {% endfor %}
+
+        {% for i in recommended_techs %}
+
+            pageData.formData.recTechs.push("{{i|escapejs}}")
+
+        {% endfor %}
+
         {% if diagram %}
 
             pageData.formData.imageUpload.push({imgURL: window.location.origin + '/media/' + "{{object.file}}", caption: "{{object.caption|escapejs}}"})
@@ -276,8 +389,8 @@ DM22-1011
     }
 
     function pageCreated() {
-        {% if object.name %}
-            this.baseData.layoutArgs.pageTitle = "{{object.name}}"
+        {% if object %}
+            this.baseData.layoutArgs.pageTitle = "{{name}}"
         {% else %}
             this.baseData.layoutArgs.pageTitle = "New Attack Path"
         {% endif %}
@@ -346,6 +459,62 @@ DM22-1011
             },
             filterTechniques: function(searchTerm) {
                 this.attackSectionArgs.attackSearchList = this.attackData().filter(technique => technique.fields.name.toLowerCase().includes(searchTerm.toLowerCase()) || technique.fields.tactics.toLowerCase().includes(searchTerm.toLowerCase()) || technique.fields.description.toLowerCase().includes(searchTerm.toLowerCase()) || technique.fields.t_id.toLowerCase().includes(searchTerm.toLowerCase()))
+            },
+            toggleTools: function(filter) {
+
+                for (var obj in this.toolFilters) {
+                    if (obj == filter) {
+                        this.toolFilters[obj] = true
+                    }
+                    else {
+                        this.toolFilters[obj] = false
+                    }
+                }
+
+                if (filter == "all") {
+                    this.toolSectionArgs.toolSearchList = this.toolData().filter(tool => tool)
+                }
+
+                else if (filter == "selected") {
+                    this.toolSectionArgs.toolSearchList = this.toolData().filter(tool => this.formData.tools.includes(tool.fields.name))
+                }
+
+                else if (filter == "recommended") {
+                    this.toolSectionArgs.toolSearchList = this.toolData().filter(tool => this.formData.recTools.includes(tool.fields.name))
+                }
+
+            },
+            toggleTechs: function(filter, string) {
+
+                for (var obj in this.techFilters) {
+                    if (obj == filter) {
+                        this.techFilters[obj] = true
+                    }
+                    else {
+                        this.techFilters[obj] = false
+                    }
+                }
+
+                if (filter == "all") {
+                    this.attackSectionArgs.attackSearchList = this.attackData().filter(technique => technique)
+                }
+
+                else if (filter == "selected") {
+                    this.attackSectionArgs.attackSearchList = this.attackData().filter(technique => this.formData.techniques.includes(technique.fields.name))
+                }
+
+                else if (filter == "recommended") {
+                    this.attackSectionArgs.attackSearchList = this.attackData().filter(technique => this.formData.recTechs.includes(technique.fields.name))
+                }
+
+                else if (filter == "sub") {
+                    this.attackSectionArgs.attackSearchList = this.attackData().filter(technique => technique.fields.is_subtechnique == true)
+                }
+
+                else {
+                    this.attackSectionArgs.attackSearchList = this.attackData().filter(technique => technique.fields.tactics.toLowerCase().includes(string.toLowerCase()))
+                }
+
             },
             saveDetails: function () {
 

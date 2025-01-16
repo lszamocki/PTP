@@ -27,6 +27,19 @@ class RansomwareSusceptibility(generic.base.TemplateView):
         context = {}
         context['scenarios'] = RansomwareScenarios.objects.all().first()
         context['ransomware'] = Ransomware.objects.all().order_by('order')
+
+        missing = []
+
+        for r in context['ransomware']:
+            if not r.disabled:
+                if r.time_start == None:
+                    missing.append(str(r.order))
+                    continue
+                elif r.trigger == "Y" and r.time_end == None:
+                    missing.append(str(r.order))
+
+        context['missing'] = ', '.join(missing)
+
         return context
 
     def post(self, request, *args, **kwargs):

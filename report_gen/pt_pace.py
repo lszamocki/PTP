@@ -19,6 +19,7 @@ import argparse
 import datetime
 import reportlab
 import inflect
+from decimal import *
 
 import report_gen.utilities.assessment_facts as af
 
@@ -31,6 +32,7 @@ from reportlab.platypus import Paragraph, SimpleDocTemplate, Flowable, Spacer, P
 from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.lib.enums import TA_LEFT
 from reportlab.lib.units import inch
+from ptportal.models import Mitigation
 
 # Constants
 tstamp = str(datetime.datetime.now().strftime("%Y%m%d_%H.%M.%S"))
@@ -200,17 +202,26 @@ def generate_pace_document(output, json, assets):
 
     for cnt, finding in enumerate(af.model_gen(rva_info, 'ptportal.uploadedfinding')):
         ele = finding['fields']
-        f_data = {"order": cnt + 1, "name": ele['uploaded_finding_name'], "severity": ele['severity'], "mitigation": ele['mitigation'], "risk_score": ele['risk_score']}
+        mitigation_date = "YYYY-MM-DD"
+        if Decimal(ele['unmitigated']).is_zero():
+            mit_dates = []
+            mit = Mitigation.objects.filter(finding__uploaded_finding_id=ele['uploaded_finding_id'])
+            for m in mit:
+                if m.mitigation_date is not None:
+                    mit_dates.append(datetime.datetime.strptime(str(m.mitigation_date), '%Y-%m-%d').date())
+            if mit_dates:
+                mitigation_date=str(max(mit_dates))
+        f_data = {"order": cnt + 1, "name": ele['uploaded_finding_name'], "created_at": ele['created_at'], "order": ele['duplicate_finding_order'], "assessment_type": ele['assessment_type'], "severity": ele['severity'], "unmitigated": ele['unmitigated'], "mitigation_date": mitigation_date, "risk_score": ele['risk_score'], "mitigated_risk_score": ele['mitigated_risk_score']}
         total_risk_score += ele['risk_score']
-        if not ele['mitigation']:
-            mitigated_risk_score += ele['risk_score']
+        mitigated_risk_score += ele['mitigated_risk_score']
         severity_count[ele['severity']] += 1
         findings.append(f_data)
 
-    order = {"Critical": 0, "High": 1, "Medium": 2, "Low": 3, "Informational": 4}
-    findings_list = sorted(findings, key=lambda s: order[s['severity']])
+    sev_order = {"Critical": 0, "High": 1, "Medium": 2, "Low": 3, "Informational": 4}
+    asmt_order = {"External": 0, "Internal": 1, "Phishing": 2}
+    findings_list = sorted(findings, key=lambda s: (sev_order[s['severity']], asmt_order[s['assessment_type']], s['name'], s['created_at']))
 
-    subtitle = "RV" + str(asmt_id) + " - " + stakeholder_name
+    subtitle = "VMA" + str(asmt_id) + " - " + stakeholder_name
     page = []
 
     assessment_types = get_list(assets+"assessment_types.txt")
@@ -244,7 +255,7 @@ def generate_pace_document(output, json, assets):
     doc_title = Paragraph('<font size="16" color="#035288">POST-ASSESSMENT CLOSURE EVALUATION</font>', title_style)
 
     purpose = Paragraph('<font size="14" color="#5A5B5C">Purpose</font>', header_style)
-    purpose_description = Paragraph('<font size="10" color="#5A5B5C">As a follow up to the CISA assessment performed for '+stakeholder_name+' approximately ninety (90) days ago, the CISA Assessments team is requesting feedback regarding the status of mitigation and remediation efforts. These responses will help the CISA Assessments team measure and validate the effectiveness of the recommendations and mitigations supplied within the assessment report. Additionally, the responses will help identify opportunities for enhancing CISA products and services.</font>', body_style)
+    purpose_description = Paragraph('<font size="10" color="#5A5B5C">As a follow up to the CISA assessment performed for '+stakeholder_name+' approximately ninety (90) days ago, the CISA team is requesting feedback regarding the status of mitigation and remediation efforts. These responses will help the CISA team measure and validate the effectiveness of the recommendations and mitigations supplied within the assessment report. Additionally, the responses will help identify opportunities for enhancing CISA products and services.</font>', body_style)
 
     instructions = Paragraph('<font size="14" color="#5A5B5C">Instructions</font>', header_style)
     instructions_1 = Paragraph('<font size="10" color="#5A5B5C">1.  The Assessment Information section should be completed by a CISA representative, then reviewed and validated by '+stakeholder_name+'.</font>', body_style)
@@ -254,7 +265,7 @@ def generate_pace_document(output, json, assets):
     information = Paragraph('<font size="14" color="#5A5B5C">Assessment Information</font>', header_style)
 
     data = [['Assessment Type', ChoiceField(name='asmt_type', tooltip='Assessment Type', value=report_type, options=assessment_types, height=18, width=270, fontSize=10)],
-            ['Assessment ID', TextField(name='asmt_id', value='RV'+asmt_id, tooltip='Assessment ID', height=18, width=270, fontSize=10)],
+            ['Assessment ID', TextField(name='asmt_id', value='VMA'+asmt_id, tooltip='Assessment ID', height=18, width=270, fontSize=10)],
             ['Sector', ChoiceField(name='sector', tooltip='Sector', value=sector, options=sector_types, height=18, width=270, fontSize=10)],
             ['Critical Infrastructure Type', ChoiceField(name='ci_type', tooltip='Critical Infrastructure Type', value=ci_type, options=ci_types, height=18, width=270, fontSize=10)],
             ['Testing Start Date', TextField(name='start_date', value=start_date, tooltip='Start Date', height=18, width=270, fontSize=10)],
@@ -284,12 +295,18 @@ def generate_pace_document(output, json, assets):
     mitigation_challenges = [['Finding Name', 'Mitigation Challenge']]
 
     for cnt, finding in enumerate(findings_list):
-        finding_name = Paragraph('<font size="10" color="#5A5B5C">'+finding['name']+' ['+str(finding['risk_score'])+']</font>', body_style)
-        if finding['mitigation']:
-            mitigation_status.append([finding['severity'], finding_name, ChoiceField(name='status'+str(cnt), tooltip='Status', value='Fully Mitigated', options=status_types, height=18, width=90, fontSize=10), TextField(name='status_date'+str(cnt), value=end_date, tooltip='Mitigation Date', height=18, width=90, fontSize=10)])
+        if finding['order'] > 0:
+            f_name = finding['name'] + " " + str(finding['order'])
         else:
+            f_name = finding['name']
+        finding_name = Paragraph('<font size="10" color="#5A5B5C">'+f_name+' ['+str(finding['risk_score'])+']</font>', body_style)
+        if float(finding['unmitigated']) == 1:
             mitigation_status.append([finding['severity'], finding_name, ChoiceField(name='status'+str(cnt), tooltip='Status', value='No Action Taken', options=status_types, height=18, width=90, fontSize=10), TextField(name='status_date'+str(cnt), value='YYYY-MM-DD', tooltip='Mitigation Date', height=18, width=90, fontSize=10)])
-        
+        elif float(finding['unmitigated']) > 0:
+            mitigation_status.append([finding['severity'], finding_name, ChoiceField(name='status'+str(cnt), tooltip='Status', value='Partially Mitigated', options=status_types, height=18, width=90, fontSize=10), TextField(name='status_date'+str(cnt), value='YYYY-MM-DD', tooltip='Mitigation Date', height=18, width=90, fontSize=10)])
+        else:
+            mitigation_status.append([finding['severity'], finding_name, ChoiceField(name='status'+str(cnt), tooltip='Status', value='Fully Mitigated', options=status_types, height=18, width=90, fontSize=10), TextField(name='status_date'+str(cnt), value=finding['mitigation_date'], tooltip='Mitigation Date', height=18, width=90, fontSize=10)])
+            
         mitigation_actions.append([finding_name, ChoiceField(name='action'+str(cnt), tooltip='Action', value='N/A', options=action_types, height=18, width=230, fontSize=10)])
         mitigation_challenges.append([finding_name, ChoiceField(name='challenge'+str(cnt), tooltip='Challenge', value='N/A', options=challenge_types, height=18, width=230, fontSize=10)])
     
@@ -355,7 +372,7 @@ def generate_pace_document(output, json, assets):
     risk_section = Paragraph('<font size="16" color="#035288">RISK SCORE</font>', title_style)
     risk_description = Paragraph('<font size="10" color="#5A5B5C">From the findings, a Total Risk Score was calculated to measure progress as findings are mitigated. If a finding was mitigated during the assessment timeframe and the CISA team was able to validate mitigation, the Mitigated Risk Score represents the deduction of those mitigated findings. Based on the responses to this questionnaire, an updated 90-Day Risk Score will be calculated.</font>', body_style)
     risk_data = [['Total Risk Score', 'Mitigated Risk Score', '90-Day Risk Score'],
-                [str(total_risk_score), str(mitigated_risk_score), TextField(name='risk_score', value='', tooltip='90-Day Risk Score', height=50, width=90, fontSize=36)]]
+                [format(total_risk_score, ","), format(mitigated_risk_score, ","), TextField(name='risk_score', value='', tooltip='90-Day Risk Score', height=50, width=90, fontSize=36)]]
 
     risk_col_widths = (2.23*inch, 2.23*inch, 2.23*inch)
     risk_row_heights = (0.4*inch, 0.8*inch)
@@ -376,7 +393,7 @@ def generate_pace_document(output, json, assets):
                                     ('TEXTCOLOR', (0, 0), (2, 0), colors.white),
                                     ('TEXTCOLOR', (0, 1), (2, 1), gray)]))
 
-    risk_end = Paragraph('<font size="10" color="#5A5B5C">CISA identified '+num.number_to_words(severity_count['Critical'])+' ('+str(severity_count['Critical'])+') critical findings, '+num.number_to_words(severity_count['High'])+' ('+str(severity_count['High'])+') high findings, '+num.number_to_words(severity_count['Medium'])+' ('+str(severity_count['Medium'])+') medium findings, '+num.number_to_words(severity_count['Low'])+' ('+str(severity_count['Low'])+') low findings, '+num.number_to_words(severity_count['Informational'])+' ('+str(severity_count['Informational'])+') informational findings. The Total Risk Score for this assessment is '+str(total_risk_score)+' and the Mitigated Risk Score after deducting mitigated findings is '+str(mitigated_risk_score)+'. The 90-Day Risk Score will be calculated once this evaluation is completed.</font>', body_style)
+    risk_end = Paragraph('<font size="10" color="#5A5B5C">CISA identified '+num.number_to_words(severity_count['Critical'])+' ('+str(severity_count['Critical'])+') critical findings, '+num.number_to_words(severity_count['High'])+' ('+str(severity_count['High'])+') high findings, '+num.number_to_words(severity_count['Medium'])+' ('+str(severity_count['Medium'])+') medium findings, '+num.number_to_words(severity_count['Low'])+' ('+str(severity_count['Low'])+') low findings, '+num.number_to_words(severity_count['Informational'])+' ('+str(severity_count['Informational'])+') informational findings. The Total Risk Score for this assessment is '+format(total_risk_score, ",")+' and the Mitigated Risk Score after deducting mitigated findings is '+format(mitigated_risk_score, ",")+'. The 90-Day Risk Score will be calculated once this evaluation is completed.</font>', body_style)
 
     # intro page
     page.append(doc_title)

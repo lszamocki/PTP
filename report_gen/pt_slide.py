@@ -192,9 +192,12 @@ def add_tag(shapes, tag_type, label, size):
         if label == "Mitigated":
             tag.fill.fore_color.rgb = low
             tag.line.color.rgb = low
-        else:
+        elif label == "Not Mitigated":
             tag.fill.fore_color.rgb = crit
             tag.line.color.rgb = crit
+        else:
+            tag.fill.fore_color.rgb = med
+            tag.line.color.rgb = med
 
     else:
         if size:
@@ -519,7 +522,15 @@ def insert_scope_slide(prs, report_type, asmt_info, ip_ext_scan, ip_ext_disc, ip
     paragraph = scope_placeholder.add_paragraph()
     paragraph.level = 1
     run = paragraph.add_run()
-    run.text = str(ip_ext_disc) + " active hosts out of " + str(ip_ext_scan) + " scanned hosts"
+    try:
+        ip_ext_disc_formatted = format(ip_ext_disc, ",")
+    except:
+        ip_ext_disc_formatted = '<not set: {EXTERNAL IPs DISCOVERED}>'
+    try:
+        ip_ext_scan_formatted = format(ip_ext_scan, ",")
+    except:
+        ip_ext_scan_formatted = '<not set: {EXTERNAL SCANNED}>'
+    run.text = ip_ext_disc_formatted + " active hosts out of " + ip_ext_scan_formatted + " scanned hosts"
     paragraph.font.color.rgb = gray
 
     # internal bullet
@@ -534,7 +545,15 @@ def insert_scope_slide(prs, report_type, asmt_info, ip_ext_scan, ip_ext_disc, ip
         paragraph = scope_placeholder.add_paragraph()
         paragraph.level = 1
         run = paragraph.add_run()
-        run.text = str(ip_int_disc) + " active hosts out of " + str(ip_int_scan) + " scanned hosts"
+        try:
+            ip_int_disc_formatted = format(ip_int_disc, ",")
+        except:
+            ip_int_disc_formatted = '<not set: {INTERNAL IPs DISCOVERED}>'
+        try:
+            ip_int_scan_formatted = format(ip_int_scan, ",")
+        except:
+            ip_int_scan_formatted = '<not set: {INTERNAL SCANNED}>'
+        run.text = ip_int_disc_formatted + " active hosts out of " + ip_int_scan_formatted + " scanned hosts"
         paragraph.font.color.rgb = gray
 
     # testing limitations bullet
@@ -572,135 +591,6 @@ def insert_goals_slide(prs, report_type):
     slide = prs.slides.add_slide(goals_slide_layout)
 
 
-#def generate_narrative_data(db):
-    """
-    Generates and returns all of the data needed to populate the narrative section of the report.
-
-    Args:
-        db (List of dict(s)): The JSON output of the assessment facts.
-
-    Returns:
-        List: List with the needed narrative information.
-    """
-    """
-    narrative = af.model_gen(db, "ptportal.narrative")
-    # Narrative is sorted by PK to get all of the sections sorted based on their main narrative.
-    sorted_narrative = sorted(narrative, key=lambda i: i["pk"])
-    screenshots = af.model_gen(db, "ptportal.toolscreenshot")
-
-    for s in screenshots:
-        n = sorted_narrative[s.get("fields").get("narrative") - 1]
-        # Screenshots are seperated from the main narrative so have to match up narratives with their respective screenshots.
-        if "Screenshots" not in n:
-            n["Screenshots"] = []
-        n["Screenshots"].append(s)
-    return sorted_narrative
-    """
-
-#def insert_narrative_slide(prs, report_type, asmt_info, media_path):
-    """Generates the narrative slides and inserts each step of the narrative.
-
-    Args:
-        prs (pptx presentation): The Powerpoint presentation.
-        report_type (str): The type of report being generated. I.e. RVA, RPT, or HVA.
-        asmt_info (List[Dict]): The Json data from the engagement.
-        media_path (str): The media file path.
-    """
-    """
-    add_section_title(prs, "Narrative")
-
-    narrative_data = generate_narrative_data(asmt_info)
-    order = ["Phishing", "External", "Internal"]
-
-    for o in order:
-        add_section_title(prs, o)
-
-        narrative = [x for x in narrative_data if x.get("fields").get("type") == o]
-        for n in narrative:
-            if "Screenshots" not in n and n["fields"]["tool_output"] == "":
-                continue
-
-            if "Screenshots" in n:
-                for s in n["Screenshots"]:
-                    screenshot = prs.slides.add_slide(prs.slide_layouts[9])
-
-                    screenshot.shapes.title.text = n["fields"]["name"]
-
-                    for shape in screenshot.shapes:
-                        if hasattr(shape, "text"):
-                            if shape.text == "":
-                                shape.text = s["fields"]["caption"]
-
-                    sfile = media_path + s["fields"]["file"]
-                    (x, y, w, h) = iu.get_screenshot_dimensions(sfile)
-                    screenshot.shapes.add_picture(
-                        sfile, Inches(x), Inches(y), width=Inches(w), height=Inches(h)
-                    )
-
-                    notes_slide = screenshot.notes_slide
-                    text_frame = notes_slide.notes_text_frame
-                    text_frame.text = (
-                        "Image Caption\n"
-                        + s["fields"]["caption"]
-                        + "\n\nScreenshot Description\n"
-                        + n["fields"]["tool_output_description"]
-                    )
-
-            if n["fields"]["tool_output"] != "":
-                code_slide = prs.slides.add_slide(prs.slide_layouts[14])
-                code_slide.shapes.title.text = n["fields"]["name"]
-
-                code_paragraph = code_slide.placeholders[1].text_frame
-                parser = rt.RichTextParser(code_paragraph)
-                parser.feed(n["fields"]["tool_output"])
-                parser.emit_pptx()
-
-                for shape in code_slide.shapes:
-                    if hasattr(shape, "text"):
-                        if shape.text == "":
-                            shape.text = n["fields"]["tool_output_description"]
-    """
-    """
-    # ---- HVA attack overview results slides
-    if report_type == "HVA":
-        # ---- External Assessment slide
-        hva_attack_overview(prs, asmt_info,
-                            "External Assessment",
-                            "report.fields.HVA_external_scenario",
-                            "External Assessment Scenario")
-
-        # ---- Phishing Assessment slide
-        hva_attack_overview(prs, asmt_info,
-                            "Phishing Assessment",
-                            "report.fields.HVA_phishing_scenario",
-                            "Phishing Assessment Scenario")
-
-        # ---- Web Application Assessment slide
-        hva_attack_overview(prs, asmt_info,
-                            "Web Application Assessment",
-                            "report.fields.HVA_web_application_scenario",
-                            "Web Application Assessment Scenario")
-
-        # ---- Internal Assessment slide
-        hva_attack_overview(prs, asmt_info,
-                            "Internal Assessment",
-                            "report.fields.HVA_internal_scenario",
-                            "Internal Assessment Scenario")
-
-        # ---- Internal Threat Emulation slide
-        hva_attack_overview(prs, asmt_info,
-                            "Internal Threat Emulation",
-                            "report.fields.HVA_ITE_scenario",
-                            "Internal Threat Emulation Scenario")
-
-        # ---- Data Exfiltration slide
-        hva_attack_overview(prs, asmt_info,
-                            "Data Exfiltration",
-                            "report.fields.HVA_data_exfiltration_scenario",
-                            "Data Exfiltration Scenario")
-    """
-
-
 def insert_OSINF_slide(prs, asmt_info):
     """Generate the OSINF slides if the report is a RPT.
 
@@ -720,33 +610,61 @@ def insert_OSINF_slide(prs, asmt_info):
     paragraph = osinf_placeholder.paragraphs[0]
     paragraph.level = 0
     run = paragraph.add_run()
-    run.text = "{} emails were scraped from various Internet sources".format(
-        af.get_db_info(asmt_info, "breachmetrics.fields.emails_identified", "EmailsIdentified")
+
+    emails_identified = af.get_db_info(
+        asmt_info, "breachmetrics.fields.emails_identified", "EmailsIdentified"
     )
+
+    try:
+        run.text = format(emails_identified, ",") + " emails were scraped from various Internet sources"
+    except:
+        run.text = "<# EMAILS IDENTIFIED> emails were scraped from various Internet sources"
+
     paragraph.font.color.rgb = gray
 
     paragraph = osinf_placeholder.add_paragraph()
     paragraph.level = 0
     run = paragraph.add_run()
-    run.text = "{} scraped emails were identified as existing in previous data breaches (according to HaveIBeenPwned database)".format(
-        af.get_db_info(asmt_info, "breachmetrics.fields.emails_identified_tp", "EmailsIdentifiedTP")
+
+    emails_identified_tp = af.get_db_info(
+        asmt_info, "breachmetrics.fields.emails_identified_tp", "EmailsIdentifiedTP"
     )
+
+    try:
+        run.text = format(emails_identified_tp, ",") + " scraped emails were identified as existing in previous data breaches (according to HaveIBeenPwned database)"
+    except:
+        run.text = "<# EMAILS IDENTIFIED THIRD-PARTY BREACHES> scraped emails were identified as existing in previous data breaches (according to HaveIBeenPwned database)"
+
     paragraph.font.color.rgb = gray
 
     paragraph = osinf_placeholder.add_paragraph()
     paragraph.level = 0
     run = paragraph.add_run()
-    run.text = "{} sets of credentials (emails and passwords) identified in the wild".format(
-        af.get_db_info(asmt_info, "breachmetrics.fields.creds_identified", "CredsIdentified")
+
+    creds_identified = af.get_db_info(
+        asmt_info, "breachmetrics.fields.creds_identified", "CredsIdentified"
     )
+
+    try:
+        run.text = format(creds_identified, ",") + " sets of credentials (emails and passwords) identified in the wild"
+    except:
+        run.text = "<# CREDENTIALS IDENTIFIED> sets of credentials (emails and passwords) identified in the wild"
+
     paragraph.font.color.rgb = gray
 
     paragraph = osinf_placeholder.add_paragraph()
     paragraph.level = 0
     run = paragraph.add_run()
-    run.text = "{} sets of credentials were successfully validated".format(
-        af.get_db_info(asmt_info, "breachmetrics.fields.creds_validated", "CredsValidated")
+
+    creds_validated = af.get_db_info(
+        asmt_info, "breachmetrics.fields.creds_validated", "CredsValidated"
     )
+
+    try:
+        run.text = format(creds_validated, ",") + " sets of credentials were successfully validated"
+    except:
+        run.text = "<# CREDENTIALS VALIDATED> sets of credentials were successfully validated"
+        
     paragraph.font.color.rgb = gray
 
 
@@ -775,9 +693,9 @@ def insert_findings_slides(prs, report_type, asmt_info, ss_info, media_path, sli
     for cnt, finding in enumerate(af.model_gen(asmt_info, 'ptportal.uploadedfinding')):
         ele = finding['fields']
         if ele['KEV']:
-            f_data = {"pk": finding['pk'], "name": ele['uploaded_finding_name'], "severity": ele['severity'], "mitigation": ele['mitigation'], "risk_score": ele['risk_score'], "kev": True}
+            f_data = {"pk": finding['pk'], "name": ele['uploaded_finding_name'], "created_at": ele['created_at'], "order": ele['duplicate_finding_order'], "assessment_type": ele['assessment_type'], "severity": ele['severity'], "unmitigated": ele['unmitigated'], "risk_score": ele['risk_score'], "mitigated_risk_score": ele['mitigated_risk_score'], "kev": True}
         else:
-            f_data = {"pk": finding['pk'], "name": ele['uploaded_finding_name'], "severity": ele['severity'], "mitigation": ele['mitigation'], "risk_score": ele['risk_score'], "kev": False}
+            f_data = {"pk": finding['pk'], "name": ele['uploaded_finding_name'], "created_at": ele['created_at'], "order": ele['duplicate_finding_order'], "assessment_type": ele['assessment_type'], "severity": ele['severity'], "unmitigated": ele['unmitigated'], "risk_score": ele['risk_score'], "mitigated_risk_score": ele['mitigated_risk_score'], "kev": False}
 
         findings.append(f_data)
 
@@ -791,18 +709,18 @@ def insert_findings_slides(prs, report_type, asmt_info, ss_info, media_path, sli
 
         for f in findings:
             total_risk_score += f['risk_score']
-            if not f['mitigation']:
-                mitigated_risk_score += f['risk_score']
+            mitigated_risk_score += f['mitigated_risk_score']
 
-        slide.placeholders[11].text = str(total_risk_score)
-        slide.placeholders[12].text = str(mitigated_risk_score)
+        slide.placeholders[11].text = format(total_risk_score, ",")
+        slide.placeholders[12].text = format(mitigated_risk_score, ",")
 
         risk_chart = media_path + 'charts/riskchart.png'
 
         slide.placeholders[13].insert_picture(risk_chart)
 
-    order = {"Critical": 0, "High": 1, "Medium": 2, "Low": 3, "Informational": 4}
-    findings_list = sorted(findings, key=lambda s: order[s['severity']])
+    sev_order = {"Critical": 0, "High": 1, "Medium": 2, "Low": 3, "Informational": 4}
+    asmt_order = {"External": 0, "Internal": 1, "Phishing": 2}
+    findings_list = sorted(findings, key=lambda s: (sev_order[s['severity']], asmt_order[s['assessment_type']], s['name'], s['created_at']))
     chunks = [findings_list[x:x+10] for x in range(0, len(findings_list), 10)]
 
     for cnt, chunk in enumerate(chunks):
@@ -841,9 +759,13 @@ def insert_findings_slides(prs, report_type, asmt_info, ss_info, media_path, sli
             table.cell(0, i).vertical_anchor = MSO_ANCHOR.MIDDLE
 
         for count, finding in enumerate(chunk):
+            if finding['order'] > 0:
+                finding_name = finding['name'] + " " + str(finding['order'])
+            else:
+                finding_name = finding['name']
             f_id = (cnt * 10) + (count + 1)
             cell_text(table, count + 1, 0, str(f_id), color=gray)
-            cell_text(table, count + 1, 1, finding['name'], color=gray)
+            cell_text(table, count + 1, 1, finding_name, color=gray)
             sev_cell = table.cell(count + 1, 2).text_frame.paragraphs[0]
             sev_color = sev_cell.add_run()
             sev_color.text =  ("• ")
@@ -877,9 +799,12 @@ def insert_findings_slides(prs, report_type, asmt_info, ss_info, media_path, sli
     for cnt, finding in enumerate(findings_list):
 
         fpk = finding['pk']
-        name = finding['name']
+        if finding['order'] > 0:
+            finding_name = finding['name'] + " " + str(finding['order'])
+        else:
+            finding_name = finding['name']
         severity = finding['severity']
-        mitigation = finding['mitigation']
+        unmitigated = float(finding['unmitigated'])
         kev = finding['kev']
 
         screenshots = af.find_screenshots(ss_info, finding['pk'])
@@ -888,14 +813,18 @@ def insert_findings_slides(prs, report_type, asmt_info, ss_info, media_path, sli
             findings_layout = prs.slide_layouts[14]
             slide = prs.slides.add_slide(findings_layout)
             shapes = slide.shapes
-            shapes.title.text = finding['name']
+            shapes.title.text = finding_name
 
             add_tag(shapes, "severity", severity, slide_size)
 
-            if mitigation:
-                add_tag(shapes, "mitigation", "Mitigated", slide_size)
-            else:
+            if unmitigated == 1:
                 add_tag(shapes, "mitigation", "Not Mitigated", slide_size)
+            elif unmitigated > 0:
+                percent_mitigated = int((1-round(unmitigated, 2)) * 100)
+                add_tag(shapes, "mitigation", str(percent_mitigated) + "% Mitigated", slide_size)
+            else:
+                add_tag(shapes, "mitigation", "Mitigated", slide_size)
+                
 
             if kev:
                 add_tag(shapes, "kev", "KEV", slide_size)
@@ -907,7 +836,7 @@ def insert_findings_slides(prs, report_type, asmt_info, ss_info, media_path, sli
                 findings_layout = prs.slide_layouts[14]
                 slide = prs.slides.add_slide(findings_layout)
                 shapes = slide.shapes
-                shapes.title.text = finding['name']
+                shapes.title.text = finding_name
 
                 sfile = media_path + ssf['file']
                 (x, y, w, h) = iu.get_screenshot_dimensions(sfile, "finding", slide_size)
@@ -917,10 +846,12 @@ def insert_findings_slides(prs, report_type, asmt_info, ss_info, media_path, sli
 
                 add_tag(shapes, "severity", severity, slide_size)
 
-                if mitigation:
-                    add_tag(shapes, "mitigation", "Mitigated", slide_size)
-                else:
+                if unmitigated == 1:
                     add_tag(shapes, "mitigation", "Not Mitigated", slide_size)
+                elif unmitigated > 0:
+                    add_tag(shapes, "mitigation", "Partially Mitigated", slide_size)
+                else:
+                    add_tag(shapes, "mitigation", "Mitigated", slide_size)
 
                 if kev:
                     add_tag(shapes, "kev", "KEV", slide_size)
@@ -1003,10 +934,13 @@ def insert_services_slides(prs, asmt_info, slide_size):
             if af.get_db_info(asmt_info, 'ransomwarescenarios.fields.total', 'NA') != '<not set: NA>':
                 total = int(af.get_db_info(asmt_info, 'ransomwarescenarios.fields.total', 'NA'))
 
+            vuln_formatted = format(vuln, ",")
+            total_formatted = format(total, ",")
+
             paragraph = ransomware_placeholder.paragraphs[0]
             paragraph.level = 1
             run = paragraph.add_run()
-            run.text = f"During ransomware simulation, the CISA team found that endpoints are vulnerable to {vuln} out of the {total} ransomware scenarios tested."
+            run.text = f"During ransomware simulation, the CISA team found that endpoints are vulnerable to {vuln_formatted} out of the {total_formatted} ransomware scenarios tested."
             paragraph.font.color.rgb = gray
 
         ransomware_results = []
@@ -1383,7 +1317,7 @@ def insert_services_slides(prs, asmt_info, slide_size):
             if int(c['length']) == 1:
                 length = str(c['length']) + " Day"
             else:
-                length = str(c['length']) + " Days"
+                length = format(c['length'], ",") + " Days"
 
             cell_text(table, 1, 0, "Emails Sent", color=gray)
             cell_text(table, 2, 0, "Emails Successfully Delivered", color=gray)
@@ -1395,20 +1329,20 @@ def insert_services_slides(prs, asmt_info, slide_size):
             cell_text(table, 8, 0, "Users Exploited", color=gray)
             cell_text(table, 9, 0, "Length of Campaign", color=gray)
 
-            cell_text(table, 1, 1, str(c['sent']), color=gray)
-            cell_text(table, 2, 1, str(c['delivered']), color=gray)
+            cell_text(table, 1, 1, format(c['sent'], ","), color=gray)
+            cell_text(table, 2, 1, format(c['delivered'], ","), color=gray)
             cell_text(table, 3, 1, str(click_rate) + "%", color=gray)
-            cell_text(table, 4, 1, str(c['total']), color=gray)
-            cell_text(table, 5, 1, str(c['unique']), color=gray)
+            cell_text(table, 4, 1, format(c['total'], ","), color=gray)
+            cell_text(table, 5, 1, format(c['unique'], ","), color=gray)
             cell_text(table, 6, 1, time_to_first_click, color=gray)
             if str(c['harvest']) == "None":
                 cell_text(table, 7, 1, "N/A", color=gray)
             else:
-                cell_text(table, 7, 1, str(c['harvest']), color=gray)
+                cell_text(table, 7, 1, format(c['harvest'], ","), color=gray)
             if str(c['exploit']) == "None":
                 cell_text(table, 8, 1, "N/A", color=gray)
             else:
-                cell_text(table, 8, 1, str(c['exploit']), color=gray)
+                cell_text(table, 8, 1, format(c['exploit'], ","), color=gray)
             cell_text(table, 9, 1, length, color=gray)
 
             for i in range(1, 10):

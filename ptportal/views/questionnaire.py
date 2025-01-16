@@ -44,6 +44,7 @@ class EICreate(generic.edit.CreateView):
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         context['systems'] = ElectionSystems.objects.all().order_by('order')
+        context['missing_ei'] = True
         return context
 
     def post(self, request, *args, **kwargs):
@@ -119,6 +120,29 @@ class EIUpdate(generic.edit.UpdateView):
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         context['systems'] = ElectionSystems.objects.all().order_by('order')
+        context['missing_ei'] = False
+        questionnaire = ElectionInfrastructureQuestionnaire.objects.all().first()
+
+        no_answer = []
+        to_be_determined = []
+        systems_missing = []
+
+        for s in context['systems']:
+            if s.ei_make == "" or s.ei_model == "" or s.ei_model_num == "":
+                systems_missing.append(str(s.order))
+
+        context['systems_missing'] = ', '.join(systems_missing)
+
+        for field in questionnaire._meta.fields:
+            if field.name[0] == 'q':
+                if field.value_from_object(questionnaire) == "":
+                    no_answer.append(field.name[1:])
+                elif field.value_from_object(questionnaire) == "TBD":
+                    to_be_determined.append(field.name[1:])
+
+        context['no_answer'] = ', '.join(no_answer)
+        context['to_be_determined'] = ', '.join(to_be_determined)
+
         return context
 
     def post(self, request, *args, **kwargs):

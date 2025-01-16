@@ -20,8 +20,8 @@ class PortMappingHost(abstract_models.TimeStampedModel):
 
     ip = models.CharField(max_length=15, unique=True)
     hostname = models.CharField(max_length=500, blank=True)
-    ports = models.CharField(max_length=800, blank=True)
-    services = models.CharField(max_length=800, blank=True)
+    ports = models.CharField(max_length=5000, blank=True)
+    services = models.CharField(max_length=5000, blank=True)
     order = models.IntegerField(default=1, blank=True)
 
     def __str__(self):

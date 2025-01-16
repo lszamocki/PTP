@@ -27,6 +27,7 @@ EDR,Endpoint Detection and Response
 EOL,End-of-Life
 EWS,Exchange Web Services
 EXE,Executable (File Format)
+FAST,Federal Attack Surface Testing
 FCRM,Financial Crime Risk Management
 FTP,File Transfer Protocol
 FTPS,File Transfer Protocol Secure
@@ -70,6 +71,7 @@ PTH,Pass-the-Hash
 RADIUS,Remote Authentication Dial-In User Service
 RC4,Rivest Cipher 4
 RDP,Remote Desktop Protocol
+RPT,Remote Penetration Test
 RVA,Risk and Vulnerability Assessment
 SAM,Security Account Manager
 SAN,Subject Alternate Name

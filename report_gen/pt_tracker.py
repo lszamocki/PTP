@@ -248,7 +248,6 @@ def add_infra_details(ws, tracker_data):
     for cnt, item in enumerate(af.model_gen(tracker_data, 'ptportal.infraws')):
         ele = item['fields']
         ws_fnds.append(ele)
-    print(ws_fnds)
 
     # add a title
     ws.merge_cells('A' + str(curr_row) + ':D' + str(curr_row))

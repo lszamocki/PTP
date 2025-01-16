@@ -1,7 +1,5 @@
 ---
 
-version: '3.7'
-
 services:
   db:
     container_name: prod-db-1

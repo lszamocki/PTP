@@ -1,5 +1,6 @@
 Tool Name,URL
 ADAssessor,https://www.attivonetworks.com/product/adassessor/
+Adenum,https://github.com/SecuProject/ADenum
 AMSITools,https://github.com/mgeeky/Penetration-Testing-Tools/tree/master/red-teaming/AMSITools
 AMSITrigger,https://github.com/RythmStick/AMSITrigger
 Aircrack-ng,https://www.aircrack-ng.org/
@@ -75,6 +76,8 @@ LSArelayx,https://github.com/CCob/lsarelayx
 Legion,https://www.kali.org/tools/legion/
 LinWinPwn,https://github.com/lefayjey/linWinPwn
 Lockless,https://github.com/GhostPack/Lockless
+LSA-Reaper,https://github.com/samiam1086/LSA-Reaper
+Lsassy,https://github.com/login-securite/lsassy
 Lynis,https://www.kali.org/tools/lynis/
 MDK3,https://github.com/aircrack-ng/mdk3
 MDK4,https://github.com/aircrack-ng/mdk4
@@ -85,11 +88,13 @@ Medusa,https://www.kali.org/tools/medusa/
 Metagoofil,https://www.kali.org/tools/metagoofil/
 Metasploit,https://www.kali.org/tools/metasploit-framework/
 Mimikatz,https://www.kali.org/tools/mimikatz/
+Mitm6,https://github.com/dirkjanm/mitm6
 Mochi,https://github.com/shogunlab/Mochi
 Ncrack,https://www.kali.org/tools/ncrack/
 Nessus,https://www.tenable.com/products/nessus
 Netcat,https://www.kali.org/tools/netcat/
 Netdiscover,https://www.kali.org/tools/netdiscover/
+NetExec,https://github.com/Pennyw0rth/NetExec
 Nikto,https://www.kali.org/tools/nikto/
 NimGetSyscallStub,https://github.com/S3cur3Th1sSh1t/NimGetSyscallStub
 Nimcrypt2,https://github.com/icyguider/Nimcrypt2
@@ -98,13 +103,16 @@ Nmap,https://nmap.org/
 Nuclei,https://github.com/projectdiscovery/nuclei
 P0f,https://www.kali.org/tools/p0f/
 PCredz,https://github.com/lgandx/PCredz
-PKINITtools ,https://github.com/dirkjanm/PKINITtools
+PKINITtools,https://github.com/dirkjanm/PKINITtools
+PPLBlade,https://github.com/tastypepperoni/PPLBlade
+Pretender,https://github.com/RedTeamPentesting/pretender
 PSPKIAudit,https://github.com/GhostPack/PSPKIAudit
 PetitPotam,https://github.com/topotam/PetitPotam
 Pineapple Mark VII,https://docs.hak5.org/wifi-pineapple/
 Polenum,https://www.kali.org/tools/polenum/
 PowerShell,https://docs.microsoft.com/en-us/powershell/
 PowerSploit,https://github.com/PowerShellMafia/PowerSploit
+PowerView,https://github.com/PowerShellMafia/PowerSploit/blob/dev/Recon/PowerView.ps1
 PyWhisker,https://github.com/ShutdownRepo/pywhisker
 RainbowCrack,https://www.kali.org/tools/rainbowcrack/
 Reaver,https://www.kali.org/tools/reaver/
@@ -141,6 +149,7 @@ Sliver,https://github.com/BishopFox/sliver
 Snaffler,https://github.com/SnaffCon/Snaffler
 SpiderFoot,https://www.kali.org/tools/spiderfoot/
 SpoolSample,https://github.com/leechristensen/SpoolSample
+Spray,https://github.com/Greenwolf/Spray
 SprayCharles,https://github.com/Tw1sm/spraycharles
 Subfinder,https://www.kali.org/tools/subfinder/
 Sublist3r,https://www.kali.org/tools/sublist3r/

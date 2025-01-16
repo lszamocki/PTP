@@ -20,7 +20,8 @@ from . import engagement, findings
 from hashlib import sha256
 
 REPORT_TYPE_CHOICES = (('RVA', 'RVA'), ('FAST', 'FAST'), ('RPT', 'RPT'), ('HVA', 'HVA'))
-EXCEPTION_CHOICES = (("was", "was"), ("was not", "was not"))
+EXCEPTION_CHOICES = (('was', 'was'), ('was not', 'was not'))
+MFA_LOCATION_CHOICES = (('External', 'External'), ('Internal', 'Internal'), ('External/Internal', 'External/Internal'))
 
 
 class Report(abstract_models.TimeStampedModel):
@@ -34,6 +35,9 @@ class Report(abstract_models.TimeStampedModel):
     internal_scanned = models.IntegerField(blank=True, null=True)
     internal_discovered = models.IntegerField(blank=True, null=True)
     password_analysis = models.TextField(blank=True)
+    # mfa_status = models.BooleanField(default=False, null=True)
+    # mfa_notes = models.TextField(blank=True)
+    # mfa_location = models.CharField(max_length=17, blank=True, default="", choices=MFA_LOCATION_CHOICES)
 
     exception = models.CharField(
         blank=True,
@@ -95,3 +99,61 @@ class Acronym(models.Model):
 
     def __str__(self):
         return self.acronym + " " + self.definition
+
+"""
+class MFAVendor(abstract_models.TimeStampedModel):
+    mfa_vendor = models.CharField(
+        blank=True,
+        max_length=200,
+        verbose_name="MFA Vendor Name"
+    )
+
+    used = models.BooleanField(
+        default=False, 
+        blank=True
+    )
+    
+    order = models.PositiveIntegerField(
+        blank=True, 
+        default=1
+    )
+
+    def save(self, *args, **kwargs):
+        super().full_clean()
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return self.mfa_vendor
+
+    class Meta:
+        verbose_name_plural = "MFA Vendors"
+        ordering = ["order"]
+
+class MFAType(abstract_models.TimeStampedModel):
+    mfa_type = models.CharField(
+        blank=True,
+        max_length=200,
+        verbose_name="MFA Type"
+    )
+
+    used = models.BooleanField(
+        default=False, 
+        blank=True
+    )
+    
+    order = models.PositiveIntegerField(
+        blank=True, 
+        default=1
+    )
+
+    def save(self, *args, **kwargs):
+        super().full_clean()
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return self.mfa_type
+
+    class Meta:
+        verbose_name_plural = "MFA Types"
+        ordering = ["order"]
+"""

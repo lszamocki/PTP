@@ -64,7 +64,6 @@ def report_findings_counts():
     low = UploadedFinding.low.all()
     informational = UploadedFinding.informational.all()
 
-    internal_external = UploadedFinding.internal_and_external.all()
     external = UploadedFinding.external.all()
     internal = UploadedFinding.internal.all()
     phishing = UploadedFinding.phishing.all()
@@ -75,22 +74,9 @@ def report_findings_counts():
     findings_breakdown['Low'] = low
     findings_breakdown['Info'] = informational
 
-    findings_breakdown['Internal/External'] = internal_external
     findings_breakdown['External'] = external
     findings_breakdown['Internal'] = internal
     findings_breakdown['Phishing'] = phishing
-
-    findings_breakdown['Internal/External_Critical'] = critical.intersection(
-        internal_external
-    )
-    findings_breakdown['Internal/External_High'] = high.intersection(internal_external)
-    findings_breakdown['Internal/External_Medium'] = medium.intersection(
-        internal_external
-    )
-    findings_breakdown['Internal/External_Low'] = low.intersection(internal_external)
-    findings_breakdown['Internal/External_Info'] = informational.intersection(
-        internal_external
-    )
 
     findings_breakdown['External_Critical'] = critical.intersection(external)
     findings_breakdown['External_High'] = high.intersection(external)
@@ -332,7 +318,7 @@ class ReportUpdate(generic.edit.UpdateView):
         if engagement:
             context['eng_meta'] = engagement
 
-        uploaded_list = UploadedFinding.objects.all().order_by('assessment_type', 'severity', 'uploaded_finding_name')
+        uploaded_list = UploadedFinding.objects.all().order_by('severity', 'assessment_type', 'uploaded_finding_name', 'created_at')
         context['findings'] = uploaded_list
         context['screenshots'] = ImageFinding.objects.all().order_by('finding', 'order')
         context['kevs'] = KEV.objects.filter(found=True).order_by('cve_id')
@@ -351,6 +337,42 @@ class ReportUpdate(generic.edit.UpdateView):
         context['external_steps'] = NarrativeStep.objects.all().filter(narrative__assessment_type__name__contains="External").order_by('narrative', 'order')
         context['internal_steps'] = NarrativeStep.objects.all().filter(narrative__assessment_type__name__contains="Internal").order_by('narrative', 'order')
         context['port_mapping'] = PortMappingHost.objects.all().order_by('order')
+        #context['mfa_vendors'] = serializers.serialize("json", MFAVendor.objects.all())
+        #context['selected_vendors'] = MFAVendor.objects.filter(used=True)
+        #context['mfa_types'] = serializers.serialize("json", MFAType.objects.all())
+        #context['selected_types'] = MFAType.objects.filter(used=True)
+
+        missing = []
+
+        if report.report_type == "RVA" or report.report_type == "RPT":
+            if report.significant_findings == "":
+                missing.append("Significant Findings")
+            if report.recommendations == "":
+                missing.append("Recommendations")
+            if report.observed_strengths == "":
+                missing.append("Observed Strengths")
+
+        if report.report_type == "RVA":
+            if report.users_targeted == None:
+                missing.append("Phishing User Count")
+            if report.external_discovered == None:
+                missing.append("Discovered External Host Count")
+            if report.external_scanned == None:
+                missing.append("Scanned External Host Count")
+            if report.internal_discovered == None:
+                missing.append("Discovered Internal Host Count")
+            if report.internal_scanned == None:
+                missing.append("Scanned Internal Host Count")
+            if report.password_analysis == "":
+                missing.append("Password Analysis Data")
+
+        else:
+            if report.external_discovered == None:
+                missing.append("Discovered Host Count")
+            if report.external_discovered == None:
+                missing.append("Scanned Host Count")
+
+        context['missing'] = ', '.join(missing)
         
         cis_csc_objects = CIS_CSC.objects.all().order_by('CIS_ID')
         context['cis_csc'] = cis_csc_objects
@@ -483,8 +505,56 @@ class ReportUpdate(generic.edit.UpdateView):
         report = Report.object()
 
         postData = json.loads(request.POST['data'])
+        #mfa_vendors = []
+        #mfa_types = []
 
         reportForm = ReportForm(postData, instance=Report.objects.get(id=1))
+        """
+        if postData['mfa_status'] == False:
+            deletedVendors = set(MFAVendor.objects.filter(used=True))
+            deletedTypes = set(MFAType.objects.filter(used=True))
+
+        else:
+            for v in postData['mfa_vendors']:
+                try:
+                    obj = MFAVendor.objects.get(mfa_vendor=v)
+                    obj.used = True
+                    obj.save()
+                    mfa_vendors.append(obj)
+                except Exception as e:
+                    print(e)
+                    continue
+
+            deletedVendors = set(MFAVendor.objects.filter(used=True)) - set(mfa_vendors)
+
+            for t in postData['mfa_types']:
+                try:
+                    obj = MFAType.objects.get(mfa_type=t)
+                    obj.used = True
+                    obj.save()
+                    mfa_types.append(obj)
+                except Exception as e:
+                    print(e)
+                    continue
+
+            deletedTypes = set(MFAType.objects.filter(used=True)) - set(mfa_types)
+
+        for deleted in deletedVendors:
+            try:
+                deleted.used = False
+                deleted.save()
+            except Exception as e:
+                print(e)
+                continue
+
+        for deleted in deletedTypes:
+            try:
+                deleted.used = False
+                deleted.save()
+            except Exception as e:
+                print(e)
+                continue
+        """
         if reportForm.is_valid():
             reportForm.save()
         else:

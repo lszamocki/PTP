@@ -33,7 +33,7 @@ allModels = [
     HVAData,
     HVATarget,
     ImageFinding,
-    AffectedSystems,
+    AffectedSystem,
     InfraTS,
     InfraPhishing,
     InfraRedirectors,
@@ -49,6 +49,8 @@ allModels = [
     ElectionSystems,
     Campaign,
     Payload,
+    NarrativeBlock,
+    NarrativeBlockStep,
     NarrativeType,
     Narrative,
     NarrativeStep,
@@ -63,7 +65,8 @@ allModels = [
     SecuritySolution,
     Report,
     BreachMetrics,
-    BreachedEmail
+    BreachedEmail,
+    Mitigation
 ]
 
 # registering list of models

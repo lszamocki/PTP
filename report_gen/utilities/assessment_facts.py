@@ -20,12 +20,120 @@ import json
 from collections import OrderedDict
 from datetime import date
 
+import docx
+from docx.oxml import OxmlElement
+from docx.oxml.ns import qn
+
+state_to_fema_region = {
+    'AK': 'Region 10',
+    'AL': 'Region 04',
+    'AR': 'Region 06',
+    'AS': 'Region 09',
+    'AZ': 'Region 09',
+    'CA': 'Region 09',
+    'CO': 'Region 08',
+    'CT': 'Region 01',
+    'DC': 'Region 03',
+    'DE': 'Region 03',
+    'FL': 'Region 04',
+    'GA': 'Region 04',
+    'GU': 'Region 09',
+    'HI': 'Region 09',
+    'IA': 'Region 07',
+    'ID': 'Region 10',
+    'IL': 'Region 05',
+    'IN': 'Region 05',
+    'KS': 'Region 07',
+    'KY': 'Region 04',
+    'LA': 'Region 06',
+    'MA': 'Region 01',
+    'MD': 'Region 03',
+    'ME': 'Region 01',
+    'MI': 'Region 05',
+    'MN': 'Region 05',
+    'MO': 'Region 07',
+    'MP': 'Region 09',
+    'MS': 'Region 04',
+    'MT': 'Region 08',
+    'NC': 'Region 04',
+    'ND': 'Region 08',
+    'NE': 'Region 07',
+    'NH': 'Region 01',
+    'NJ': 'Region 02',
+    'NM': 'Region 06',
+    'NV': 'Region 09',
+    'NY': 'Region 02',
+    'OH': 'Region 05',
+    'OK': 'Region 06',
+    'OR': 'Region 10',
+    'PA': 'Region 03',
+    'PR': 'Region 02',
+    'RI': 'Region 01',
+    'SC': 'Region 04',
+    'SD': 'Region 08',
+    'TN': 'Region 04',
+    'TX': 'Region 06',
+    'UT': 'Region 08',
+    'VA': 'Region 03',
+    'VI': 'Region 02',
+    'VT': 'Region 01',
+    'WA': 'Region 10',
+    'WI': 'Region 05',
+    'WV': 'Region 03',
+    'WY': 'Region 08',
+}
 
 # ---- Get the json information
 def load_asmt_info(json_file):
     with open(json_file) as f:
         return json.load(f)
 
+
+def get_region_email(state):
+    try:
+        fema_region = state_to_fema_region[state]
+        region_number = fema_region.split()[-1]
+        email = f"CISA.IOD.REGION.R{region_number}_Cyber_Security@cisa.dhs.gov"
+    except:
+        if state == "<not set: {Customer State}>":
+            print("Missing value for customer state.")
+        else:
+            print("No region found for: " + state)
+        email = "<IOD REGION EMAIL ALIAS>"
+    return email
+
+def add_hyperlink(paragraph, text, url):
+    # Create a new "hyperlink" element
+    part = paragraph.part
+    r_id = part.relate_to(url, docx.opc.constants.RELATIONSHIP_TYPE.HYPERLINK, is_external=True)
+    hyperlink = OxmlElement('w:hyperlink')
+    hyperlink.set(qn('r:id'), r_id)
+
+    # Create a new run with the specified text
+    new_run = OxmlElement('w:r')
+
+    # Set run properties for styling
+    rPr = OxmlElement('w:rPr')
+    color = OxmlElement('w:color')
+    color.set(qn('w:val'), '0000FF')  # Blue color in hex
+    rPr.append(color)
+
+    underline = OxmlElement('w:u')
+    underline.set(qn('w:val'), 'single')  # Underline the text
+    rPr.append(underline)
+
+    new_run.append(rPr)
+
+    # Create the text element and add it to the run
+    text_elem = OxmlElement('w:t')
+    text_elem.text = text
+    new_run.append(text_elem)
+
+    # Append the run to the hyperlink
+    hyperlink.append(new_run)
+
+    # Append the hyperlink to the paragraph
+    paragraph._p.append(hyperlink)
 
 def get_db_info(rva_db, db_loc, key, allow_empty=False):
     """This function is used to get values from elements that have a
@@ -77,12 +185,11 @@ tag_db_map = {
     "{ASMT ID}": "engagementmeta.fields.asmt_id",
     "{Team Lead Name}": "engagementmeta.fields.team_lead_name",
     "{Team Lead Email}": "engagementmeta.fields.team_lead_email",
-    "{External Start Date}": "engagementmeta.fields.ext_start_date",
-    "{External End Date}": "engagementmeta.fields.ext_end_date",
+    "{External Dates}": "engagementmeta.fields.ext_start_date",
     "{Stakeholder Location}": "engagementmeta.fields.customer_location",
+    "{Customer State}": "engagementmeta.fields.customer_state",
     "{Short business level external scope – tech scope is in appendix.}": "report.fields.scanned_scope_ext",
-    "{Internal Start Date}": "engagementmeta.fields.int_start_date",
-    "{Internal End Date}": "engagementmeta.fields.int_end_date",
+    "{Internal Dates}": "engagementmeta.fields.int_start_date",
     "{Traffic Light}": "engagementmeta.fields.traffic_light_protocol",
     "{total number of emails found}": "report.fields.emails_identified",
     "{total number of breached emails found}": "report.fields.emails_breached",
@@ -218,7 +325,7 @@ def find_steps(s_list, nkey):
 def build_affected_systems_info(db):
     """Generate a dictionary of all affected systems"""
     asys = {}
-    for ele in model_gen(db, "ptportal.affectedsystems"):
+    for ele in model_gen(db, "ptportal.affectedsystem"):
         asys_name = ele['fields']['name']
         pk = ele['pk']
         asys[pk] = asys_name

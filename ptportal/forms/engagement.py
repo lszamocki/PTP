@@ -61,6 +61,6 @@ class EngagementForm(BaseModelForm):
         confirm_password = cleaned_data.get("confirm_report_password")
 
         if password != confirm_password:
-            self.add_error('confirm_report_password', "Password does not match")
+            self.add_error('confirm_report_password', "Passwords do not match.")
 
         return cleaned_data

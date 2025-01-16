@@ -1,5 +1,6 @@
 Name
 Arctic Wolf
+ArmorPoint
 Avast Endpoint
 Bitdefender
 Carbon Black
@@ -29,6 +30,7 @@ Microsoft Windows Defender ATP
 Morphisec
 McAfee
 PC Matic
+Secureworks Taegis Extended Detection and Response (XDR)
 SentinelOne
 Sophos Central
 Sophos Intercept X
@@ -37,6 +39,7 @@ Sophos Managed Threat Response (MTR)
 Symantec Endpoint Security
 Trellix
 Trend Micro
+WatchGuard
 Webroot
 WithSecure
 Vipre

@@ -15,10 +15,46 @@ DM22-1011
 {% extends 'ptportal/base.html' %}
 {% block active %}#portMapping{% endblock %}
 
+{% block style %}
+<style>
+    .warningcard {
+      width: 100%;
+      font-size: 10pt;
+      background-color: #FFE3CB;
+      padding: 15px;
+      border: 2px solid #F79322;
+      text-align: left;
+      overflow: auto;
+    }
+    .warningcard img {
+      float: left;
+      padding: 2px;
+    }
+    .warningcard p {
+      padding: 0px 30px;
+    }
+</style>
+{% endblock %}
 
 {% block content %}
+{% csrf_token %}
+
+{% if not hosts %}
+  <div class="warningcard">
+    <img class="w-8 h-8" src="/static/icons/triangle-exclamation-solid.svg">
+    <p><b>Warning:</b> No hosts have been added.</p>
+  </div>
+  <br>
+{% endif %}
+
+{% if missing %}
+  <div class="warningcard">
+    <img class="w-8 h-8" src="/static/icons/triangle-exclamation-solid.svg">
+    <p><b>Warning:</b> The following rows are missing one or more values: {{missing}}</p>
+  </div>
+  <br>
+{% endif %}
 <div class="col-span-5">
-	{% csrf_token %}
 	<sds-modal size="sm" v-model="overwriteWarning">
 		<template #title>
 			<p>Warning</p>
@@ -56,10 +92,10 @@ DM22-1011
 						<sds-textarea v-model="item.hostname" rows="1" placeholder="test.server" :maxlength="500"></sds-textarea>
 					</template>
 					<template #cell(ports)="{item}">
-						<sds-textarea v-model="item.ports" rows="3" placeholder="22/tcp, 80/tcp, 443/tcp" :maxlength="800"></sds-textarea>
+						<sds-textarea v-model="item.ports" rows="3" placeholder="22/tcp, 80/tcp, 443/tcp" :maxlength="5000"></sds-textarea>
 					</template>
 					<template #cell(services)="{item}">
-						<sds-textarea v-model="item.services" rows="3" placeholder="ssh, http, http" :maxlength="800"></sds-textarea>
+						<sds-textarea v-model="item.services" rows="3" placeholder="ssh, http, http" :maxlength="5000"></sds-textarea>
 					</template>
 					<template #cell(delete)="{item}">
 						<sds-button type="button" @click="deleteMapping(item)"><img class="w-8 h-8" src="/static/icons/trash-solid.svg"></sds-input>
@@ -85,6 +121,10 @@ DM22-1011
 			notify: null,
 			NmapTableArgs: {
 				fields: [
+					{
+						key: "id",
+						label: "#",
+					},
 					{
 						key: "ip",
 						label: "IP",
@@ -122,7 +162,7 @@ DM22-1011
 		}
 
 		{% for host in hosts %}
-			data.NmapTableArgs.items.push({ip: "{{host.ip|escapejs}}", hostname: "{{host.hostname|escapejs}}", ports: "{{host.ports|escapejs}}", services: "{{host.services|escapejs}}"})
+			data.NmapTableArgs.items.push({id: "{{host.order}}", ip: "{{host.ip|escapejs}}", hostname: "{{host.hostname|escapejs}}", ports: "{{host.ports|escapejs}}", services: "{{host.services|escapejs}}"})
 		{% endfor %}
 
 		return data
@@ -144,8 +184,19 @@ DM22-1011
 
 				let duplicates = findDuplicates(ips)
 
+				this.NmapTableArgs.items.forEach(element => {
+					if (element.ip == "") {
+						this.notify_blank = true
+					}
+				})
+
 				if (duplicates.length > 0) {
 					this.displayNotification({title: "Duplicate IPs Detected", text: "The following duplicate IP address entries were found and must be removed before saving: " + duplicates.join(", "), variant:"warning", autoHideDelay:10000})
+				}
+
+				else if (this.notify_blank) {
+					this.displayNotification({title: "Missing IP Address", text: "One or more entries are missing an IP address. Please enter a valid IP address for each entry.", variant:"warning", autoHideDelay:10000})
+					this.notify_blank = false
 				}
 
 				else {

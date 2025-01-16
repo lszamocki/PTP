@@ -131,7 +131,8 @@ def build_ptportal(report_type, su=True, restore=False, migrations_file=None):
             report_type,
         ]
     )
-    subprocess.run(['docker', 'exec', web_container, 'python', 'manage.py', 'dbLoader'])
+    if not restore:
+        subprocess.run(['docker', 'exec', web_container, 'python', 'manage.py', 'dbLoader'])
     subprocess.run(
         [
             'docker',
@@ -145,19 +146,19 @@ def build_ptportal(report_type, su=True, restore=False, migrations_file=None):
             '0',
         ]
     )
-
-    if su:
-        subprocess.run(
-            [
-                'docker',
-                'exec',
-                '-it',
-                web_container,
-                'python',
-                'manage.py',
-                'createsuperuser',
-            ]
-        )
+    if not restore:
+        if su:
+            subprocess.run(
+                [
+                    'docker',
+                    'exec',
+                    '-it',
+                    web_container,
+                    'python',
+                    'manage.py',
+                    'createsuperuser',
+                ]
+            )
 
 
 def build_offline(report_type, restore=False, migrations_file=None):
@@ -256,46 +257,11 @@ def setup(args):
 
     log_handler.info('Dependency installation complete.')
 
-
-def dev(args, clear_docker=True):
-    dev_setup(report=args.report_type)
-
-
-def dev_setup(report):
-    log_handler = logger()
-    log_handler.info('Loading PT Portal with docker-compose for developers')
-
-    check_if_ptportal_exists(log_handler)
-
-    mode = 'dev'
-    set_mode(mode)
-
-    clear_migrations()
-    #if args.proxy:
-    #    log_handler.info('composing environment variable file for docker-compose')
-    #    compose_env(args.proxy)
-
-    docker_compose_up(force_recreate=True, rm_orphans=True)
-    build_ptportal(report_type=report)
-
-    restore_env()
-    log_handler.info('App is ready at localhost:8080!')
-
-
-def run(args):
-    prod_setup(report=args.report_type, connectivity='online')
-
-
-def prod_setup(report, connectivity):
-    log_handler = logger()
-    log_handler.info('Loading PT Portal with docker-compose')
-
-    check_if_ptportal_exists(log_handler)
-
+def secret_key_setup(mode):
     has_secret_key = False
     new_line = False
 
-    with open('docker/prod/env.txt', 'r') as f:
+    with open(f'docker/{mode}/env.txt', 'r') as f:
         lines = f.readlines()
 
         if "\n" in lines[-1]:
@@ -307,31 +273,86 @@ def prod_setup(report, connectivity):
                 break
 
     if not has_secret_key:
-        f=open('docker/prod/env.txt', 'a')
+        f=open(f'docker/{mode}/env.txt', 'a')
         if not new_line:
             f.write("\n")
         f.write("SECRET_KEY=\'")
         f.close()
-        secret_key_cmd = "python3 -c 'from django.core.management.utils import get_random_secret_key; print(get_random_secret_key(), end=\"\")' >> docker/prod/env.txt"
+        secret_key_cmd = f"python3 -c 'from django.core.management.utils import get_random_secret_key; print(get_random_secret_key(), end=\"\")' >> docker/{mode}/env.txt"
         subprocess.run(secret_key_cmd, shell=True)
-        f=open('docker/prod/env.txt', 'a')
+        f=open(f'docker/{mode}/env.txt', 'a')
         f.write("\'\n")
         f.close()
 
-    if os.path.isfile("docker/prod/nginx/ssl/selfsigned.crt") and os.path.isfile("docker/prod/nginx/ssl/selfsigned.key"):
-        print("Using existing SSL files in docker/prod/nginx/ssl")
+
+def dev(args, clear_docker=True):
+    dev_setup(report=args.report_type)
+
+
+def dev_setup(report, restore=False):
+    log_handler = logger()
+    log_handler.info('Loading PT Portal with docker-compose for developers')
+
+    check_if_ptportal_exists(log_handler)
+
+    mode = 'dev'
+    set_mode(mode)
+
+    secret_key_setup(mode)
+
+    clear_migrations()
+    #if args.proxy:
+    #    log_handler.info('composing environment variable file for docker-compose')
+    #    compose_env(args.proxy)
+
+    docker_compose_up(force_recreate=True, rm_orphans=True)
+
+    if restore:
+        build_ptportal(report_type=report, restore=True)
     else:
-        if os.path.exists("docker/prod/nginx/ssl/"):
+        build_ptportal(report_type=report)
+
+    restore_env()
+    log_handler.info('App is ready at localhost:8080!')
+
+
+def run(args):
+    out = subprocess.check_output(f'docker ps -a -q -f name=prod | wc -l', shell=True)
+    count = int(out.decode('UTF-8').rstrip())
+
+    if count > 0:
+        res = input(
+            f'WARNING: {count} container(s) associated with RE already exist and will be removed if you opt to proceed. If you did not back up your docker images, database, and media files to your system, you will lose this data and will not be able to restore it. Are you sure you wish to proceed with initiating a new RE instance? [y/n]'
+        )
+        if res == 'y' or res == 'yes':
+            prod_setup(report=args.report_type, connectivity='online')
+        exit()
+    else:
+        prod_setup(report=args.report_type, connectivity='online')
+
+
+def prod_setup(report, connectivity, restore=False):
+    log_handler = logger()
+    log_handler.info('Loading PT Portal with docker-compose')
+    mode = 'prod'
+
+    # check_if_ptportal_exists(log_handler)
+
+    secret_key_setup(mode)
+
+    if os.path.isfile(f"docker/{mode}/nginx/ssl/selfsigned.crt") and os.path.isfile(f"docker/{mode}/nginx/ssl/selfsigned.key"):
+        print(f"Using existing SSL files in docker/{mode}/nginx/ssl")
+    else:
+        if os.path.exists(f"docker/{mode}/nginx/ssl/"):
             print("SSL directory exists. Generating SSL files...")
         else:
             print("SSL directory does not exist. Creating SSL directory and generating SSL files...")
-            make_ssl = "mkdir docker/prod/nginx/ssl"
+            make_ssl = f"mkdir docker/{mode}/nginx/ssl"
             subprocess.run(make_ssl, shell=True)
         ssl_cmd = "openssl req -x509 -nodes -days 365 -subj \"/C=CA/ST=QC/O=Assessment Team/CN=reporting_engine\" -newkey rsa:2048 -keyout docker/prod/nginx/ssl/selfsigned.key -out docker/prod/nginx/ssl/selfsigned.crt"
         subprocess.run(ssl_cmd, shell=True)
-        print("SSL files saved to: docker/prod/nginx/ssl")
+        print(f"SSL files saved to: docker/{mode}/nginx/ssl")
 
-    mode = 'prod'
     set_mode(mode)
 
     clear_migrations()
@@ -345,13 +366,26 @@ def prod_setup(report, connectivity):
     else:
         docker_compose_down(rm_images=True, rm_volumes=True, rm_orphans=True)
         docker_compose_up(force_recreate=True, rm_orphans=True)
-        build_ptportal(report_type=report)
+        if restore:
+            build_ptportal(report_type=report, restore=True)
+        else:
+            build_ptportal(report_type=report)
 
     restore_env()
     log_handler.info('App is ready at https://[IP_ADDRESS]:443')
 
 
 def install_dependencies():
+    npm_status = os.popen('which npm').read().strip()
+    if not npm_status:
+        print("FAILED: npm is not intalled. Please install npm and run the setup again.")
+        sys.exit(1)
+    else:
+        npm_version = os.popen('npm --version').read().strip()
+        if npm_version[0] != "9":
+              print(f"FAILED: npm is version {npm_version}. RE requires version 9.X.X. Please install npm version 9.X.X and run the setup again.")
+              sys.exit(1)
+
     print("Installing Tailwind CSS...")
     try:
         tailwind_cmd = "npm install -D node/dependencies/tailwindcss-3 --legacy-peer-deps"
@@ -534,7 +568,7 @@ def backup_app_repo(backup_name='repo-backup'):
 
 
 def backup_json(
-    container, backup_name='json-backup', json_file='datadump.json', in_docker=False
+    container, backup_name='json-backup', json_file='datadump.json', in_docker=False, cron=False
 ):
     if in_docker:
         subprocess.run(
@@ -558,36 +592,66 @@ def backup_json(
             ]
         )
     else:
-        subprocess.run(
-            [
-                'docker',
-                'exec',
-                '-it',
-                container,
-                'python',
-                'manage.py',
-                'dumpdata',
-                '--exclude=contenttypes',
-                '--exclude=auth.Permission',
-                '--indent=2',
-                '--format=json',
-                '--output=' + json_file,
-            ]
-        )
-        _ = subprocess.run(
-            [
-                'docker',
-                'exec',
-                '-it',
-                container,
-                'python',
-                'manage.py',
-                'generate_DHS_JSON',
-                backup_name,
-            ]
-        )
-    if not Path(backup_name).exists():
-        Path(backup_name).mkdir()
+        if cron:
+            subprocess.run(
+                [
+                    'docker',
+                    'exec',
+                    '-i',
+                    container,
+                    'python',
+                    'manage.py',
+                    'dumpdata',
+                    '--exclude=contenttypes',
+                    '--exclude=auth.Permission',
+                    '--indent=2',
+                    '--format=json',
+                    '--output=' + json_file,
+                ]
+            )
+            _ = subprocess.run(
+                [
+                    'docker',
+                    'exec',
+                    '-i',
+                    container,
+                    'python',
+                    'manage.py',
+                    'generate_DHS_JSON',
+                    backup_name,
+                ]
+            )
+
+        else:
+            subprocess.run(
+                [
+                    'docker',
+                    'exec',
+                    '-it',
+                    container,
+                    'python',
+                    'manage.py',
+                    'dumpdata',
+                    '--exclude=contenttypes',
+                    '--exclude=auth.Permission',
+                    '--indent=2',
+                    '--format=json',
+                    '--output=' + json_file,
+                ]
+            )
+            _ = subprocess.run(
+                [
+                    'docker',
+                    'exec',
+                    '-it',
+                    container,
+                    'python',
+                    'manage.py',
+                    'generate_DHS_JSON',
+                    backup_name,
+                ]
+            )
+
     shutil.move(json_file, backup_name)
     return backup_name
 
@@ -595,10 +659,17 @@ def backup_json(
 def backup_media(backup_name='media-backup'):
     # using distutils copy_tree function because it
     # copies a directory into an existing directory w/o problems
-    if os.path.exists(Path('pentestportal/media')):
-        shutil.copytree(Path('pentestportal/media'), backup_name)
+    if os.path.exists(Path('pentestportal/media/screenshots')):
+        screenshots_path = backup_name + '/screenshots'
+        shutil.copytree(Path('pentestportal/media/screenshots'), screenshots_path)
     else:
-        print('pentestportal/media directory does not exist or cannot be accessed due to permissions. Media may not restore properly without this directory. Continuing with remaining back up steps...')
+        print('pentestportal/media/screenshots directory does not exist or cannot be accessed due to permissions. Screenshots may not restore properly without this directory. Continuing with remaining back up steps...')
+
+    if os.path.exists(Path('pentestportal/media/charts')):
+        charts_path = backup_name + '/charts'
+        shutil.copytree(Path('pentestportal/media/charts'), charts_path)
+    else:
+        print('pentestportal/media/charts directory does not exist or cannot be accessed due to permissions. Charts may not restore properly without this directory. Continuing with remaining back up steps...')
 
     return backup_name
 
@@ -685,8 +756,20 @@ def partial_backup(args=None, in_docker=False, password=None):
     container = mode + '-web-1'
     backup_folder = 'backup_folder'
     shutil.rmtree(backup_folder, ignore_errors=True)
+
+    try:
+        if args.cron:
+            cron = True
+        else:
+            cron = False
+    except:
+        cron = False
+
+    if not Path(backup_folder).exists():
+        Path(backup_folder).mkdir()
+
     backup_media(backup_folder)
-    backup_json(container, backup_folder, in_docker=in_docker)
+    backup_json(container, backup_folder, in_docker=in_docker, cron=cron)
     backup_migrations(backup_folder)
     backup_mode(backup_folder)
     backup_env(backup_folder)
@@ -696,7 +779,7 @@ def partial_backup(args=None, in_docker=False, password=None):
     backup_file = (
         'backup-' + datetime.datetime.now().strftime("%m-%d-%Y-%H-%M") + '.zip'
     )
-    
+
     if in_docker:
         # From the application interface.
         # The password is the engagement password
@@ -712,20 +795,29 @@ def partial_backup(args=None, in_docker=False, password=None):
         )
     else:
         # From the command line interface
-        print('Please enter a password to encrypt the backup')
-        subprocess.run(
-            [
-                'docker',
-                'exec',
-                '-it',
-                container,
-                'zip',
-                '--encrypt',
-                backup_file,
-                '-r',
-                backup_folder,
-            ]
-        )
+        command = [
+            'docker',
+            'exec'
+        ]
+
+        if cron:
+            command.append('-i')
+        else:
+            command.append('-it')
+
+        command.append(container)
+        command.append('zip')
+
+        if not args.no_password:
+            command.append('--encrypt')
+            print('Please enter a password to encrypt the backup')
+
+        command.extend([
+            backup_file,
+            '-r',
+            backup_folder
+        ])
+        subprocess.run(command)
     shutil.rmtree(backup_folder)
     return backup_file
 
@@ -742,7 +834,7 @@ def partial_restore(args):
     and the media folder with all of the images"""
 
     choice = input(
-        "Restoring will delete all the data currently in the portal. Make sure to backup existing data before running a restore. Are you sure you want to restore the portal from a backup? [y/n]: "
+        "Restoring will delete all the data in existing Reporting Engine instances. Make sure to backup existing data before running a restore. Are you sure you want to restore the portal from a backup? [y/n]: "
     )
     if choice != "y":
         exit()
@@ -785,7 +877,7 @@ def partial_restore(args):
         compose_file = 'docker-compose.yml'
     else:
         compose_file = 'docker-compose.prod.yml'
-    
+
     print("Restoring media...")
     if os.path.exists(Path('pentestportal/media/charts')):
         shutil.rmtree(Path('pentestportal/media/charts'))
@@ -802,9 +894,9 @@ def partial_restore(args):
         )
 
     if mode == 'prod':
-        prod_setup(report=args.report_type, connectivity=args.connectivity)
+        prod_setup(report=args.report_type, connectivity=args.connectivity, restore=True)
     else:
-        dev_setup(report=args.report_type)
+        dev_setup(report=args.report_type, restore=True)
 
     print("Restoring database...")
     subprocess.run(
@@ -929,6 +1021,21 @@ def resume(args):
         print('App is ready at http://localhost:8080')
 
 
+def start(args):
+    print('Starting Exited Reporting Engine Containers...')
+    mode = get_mode()
+    project_name = 'prod' if mode == 'prod' else 'dev'
+
+    try:
+        subprocess.run(f'docker start $(docker ps -a -q -f status=exited -f name={project_name})', shell=True)
+        if mode == 'prod':
+            print('App is ready at https://localhost')
+        else:
+            print('App is ready at http://localhost:8080')
+    except Exception as e:
+        print('exception handler: ', e)
+
+    
 def main():
     description = "Reporting Engine"
     parser = argparse.ArgumentParser(description=description)
@@ -991,6 +1098,18 @@ def main():
 
     # backup the database and media directories
     backup_parser = subparsers.add_parser('backup', help='Backup an instance of Reporting Engine')
+    backup_parser.add_argument(
+        '-n',
+        '--no-password',
+        action='store_true',
+        help='Do not encrypt the backup zip file'
+    )
+    backup_parser.add_argument(
+        '-c',
+        '--cron',
+        action='store_true',
+        help='For backups run via crontab'
+    )
     backup_parser.set_defaults(func=backup)
 
     # restore a backups
@@ -1071,6 +1190,9 @@ def main():
 
     resume_parser = subparsers.add_parser('resume', help='Resume a paused instance of Reporting Engine')
     resume_parser.set_defaults(func=resume)
+
+    start_parser = subparsers.add_parser('start', help='Start an exited instance of Reporting Engine')
+    start_parser.set_defaults(func=start)
 
     if len(sys.argv) == 1:
         parser.print_help(sys.stderr)

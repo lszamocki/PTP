@@ -32,28 +32,19 @@ from rest_framework.renderers import JSONRenderer
 from django.conf import settings
 from django.core import serializers
 from django.core.exceptions import ObjectDoesNotExist
-from django.http import Http404, JsonResponse
+from django.http import Http404, JsonResponse, HttpResponseServerError
 from django.shortcuts import HttpResponse, render
 
 from report_gen.pt_report import generate_ptp_report
 from report_gen.pt_kev import generate_kev_report
+from report_gen.pt_findings_csv import generate_findings_csv
 from report_gen.pt_slide import generate_ptp_slides
 from report_gen.pt_tracker import create_tracker
 from report_gen.pt_pace import generate_pace_document
 
 from ptportal.serializers import ElectionInfrastructureSerializer, HVASerializer
 
-from ptportal.models import (
-    ElectionInfrastructureQuestionnaire,
-    EngagementMeta,
-    CIS_CSC,
-    Report,
-    BaseFinding,
-    GeneralFinding,
-    SpecificFinding,
-    ImageFinding,
-    UploadedFinding
-)
+from ptportal.models import *
 
 from ptportal.views.utils import (
     serializeJSON,
@@ -80,8 +71,7 @@ def report_findings_counts():
     medium = UploadedFinding.medium.all()
     low = UploadedFinding.low.all()
     informational = UploadedFinding.informational.all()
-
-    internal_external = UploadedFinding.internal_and_external.all()
+    
     external = UploadedFinding.external.all()
     internal = UploadedFinding.internal.all()
     phishing = UploadedFinding.phishing.all()
@@ -92,22 +82,9 @@ def report_findings_counts():
     findings_breakdown['Low'] = low
     findings_breakdown['Info'] = informational
 
-    findings_breakdown['Internal/External'] = internal_external
     findings_breakdown['External'] = external
     findings_breakdown['Internal'] = internal
     findings_breakdown['Phishing'] = phishing
-
-    findings_breakdown['Internal/External_Critical'] = critical.intersection(
-        internal_external
-    )
-    findings_breakdown['Internal/External_High'] = high.intersection(internal_external)
-    findings_breakdown['Internal/External_Medium'] = medium.intersection(
-        internal_external
-    )
-    findings_breakdown['Internal/External_Low'] = low.intersection(internal_external)
-    findings_breakdown['Internal/External_Info'] = informational.intersection(
-        internal_external
-    )
 
     findings_breakdown['External_Critical'] = critical.intersection(external)
     findings_breakdown['External_High'] = high.intersection(external)
@@ -162,6 +139,241 @@ class Export(generic.base.TemplateView):
             c.save()
 
         context['findings_breakdown'] = report_findings_counts()
+
+        missing_engagement_fields = []
+
+        if EngagementMeta.objects.values_list().count() > 0:
+
+            if engagement.customer_long_name == "":
+                missing_engagement_fields.append("Stakeholder Name")
+            if engagement.customer_initials == "":
+                missing_engagement_fields.append("Stakeholder Abbreviation")
+            if engagement.customer_POC_name == "":
+                missing_engagement_fields.append("Point of Contact Name")
+            if engagement.customer_POC_email == "":
+                missing_engagement_fields.append("Point of Contact Email")
+            if report.report_type == 'RVA':
+                if engagement.customer_location == "":
+                    missing_engagement_fields.append("On-Site Testing Address")
+            if engagement.customer_state == "":
+                missing_engagement_fields.append("State")
+            if engagement.customer_sector == "":
+                missing_engagement_fields.append("Sector")
+            if engagement.customer_ci_type == "":
+                missing_engagement_fields.append("Critical Infrastructure Type")
+            if engagement.customer_ci_subsector == "":
+                missing_engagement_fields.append("Critical Infrastructure Subsector")
+            if engagement.team_lead_name == "":
+                missing_engagement_fields.append("Team Lead Name")
+            if engagement.team_lead_email == "":
+                missing_engagement_fields.append("Team Lead Email")
+
+            if report.report_type == 'RVA' or report.report_type == 'RPT':
+                if engagement.phishing_domains == "":
+                    missing_engagement_fields.append("In Scope Mail Domains for Phishing")
+
+            if report.report_type == 'RVA' or report.report_type == 'FAST':
+                if engagement.ext_start_date == None:
+                    missing_engagement_fields.append("External Start Date")
+                if engagement.ext_end_date == None:
+                    missing_engagement_fields.append("External End Date")
+                if engagement.ext_scope == "":
+                    missing_engagement_fields.append("External In Scope IP Addresses/Domain Names")
+                if engagement.ext_excluded_scope == "":
+                    missing_engagement_fields.append("External Out of Scope IP Addresses/Domain Names")
+
+            if report.report_type == 'RVA':
+                if engagement.int_start_date == None:
+                    missing_engagement_fields.append("Internal Start Date")
+                if engagement.int_end_date == None:
+                    missing_engagement_fields.append("Internal End Date")
+                if engagement.int_scope == "":
+                    missing_engagement_fields.append("Internal In Scope IP Addresses/Domain Names")
+                if engagement.int_excluded_scope == "":
+                    missing_engagement_fields.append("Internal Out of Scope IP Addresses/Domain Names")
+
+            if report.report_type == 'RPT':
+                if engagement.ext_scope == "":
+                    missing_engagement_fields.append("In Scope IP Addresses for Network Penetration Test")
+                if engagement.ext_excluded_scope == "":
+                    missing_engagement_fields.append("Out of Scope IP Addresses for Network Penetration Test")
+                if engagement.web_app_scope == "":
+                    missing_engagement_fields.append("In Scope Web Applications")
+                if engagement.osinf_scope == "":
+                    missing_engagement_fields.append("In Scope Domains for OSINF")
+
+            context['missing_engagement'] = ', '.join(missing_engagement_fields)
+
+        context['payloads'] = Payload.objects.all().order_by('order')
+        context['used_solutions'] = SecuritySolution.objects.filter(used=True)
+
+        missing_payload_data = []
+
+        if report.payload_testing_date == None:
+            missing_payload_data.append("Payload Testing Date")
+        if report.exception == "":
+            missing_payload_data.append("Exception")
+        if report.browser == "":
+            missing_payload_data.append("Browser")
+
+        for p in context['payloads']:
+            if p.c2_protocol == "":
+                missing_payload_data.append(str(p.order))
+
+        context['missing_payload'] = ', '.join(missing_payload_data)
+
+        context['campaigns'] = Campaign.objects.all().order_by('order')
+
+        missing_campaign_data = []
+
+        if report.phishing_campaign_date == None:
+            missing_campaign_data.append("Phishing Campaign Date")
+
+        for c in context['campaigns']:
+            if c.emails_sent == None or c.emails_delivered == None or c.total_clicks == None or c.unique_clicks == None or c.time_to_first_click == None or c.length_of_campaign == None or c.campaign_description == "":
+                missing_campaign_data.append(str(c.order))
+
+        context['missing_campaign'] = ', '.join(missing_campaign_data)
+
+        context['findings'] = findings = UploadedFinding.objects.all()
+
+        missing_finding_data = []
+
+        for f in context['findings']:
+            if f.description == f.finding.description or f.remediation == f.finding.remediation or f.affected_systems.values_list().count() == 0 or ImageFinding.objects.filter(finding=f).values_list().count() == 0:
+                missing_finding_data.append(f.uploaded_finding_name)
+                continue
+
+            elif ImageFinding.objects.filter(finding=f).values_list().count() > 0:
+                if f.screenshot_description == "":
+                    missing_finding_data.append(f.uploaded_finding_name)
+                    continue
+                if ImageFinding.objects.filter(finding=f, caption='').values_list().count() > 0:
+                    missing_finding_data.append(f.uploaded_finding_name)
+                    continue
+
+        context['missing_finding'] = ', '.join(missing_finding_data)
+
+        missing_narrative_type = []
+        missing_narrative_data = []
+
+        ext_narratives = Narrative.objects.filter(assessment_type=1)
+        int_narratives = Narrative.objects.filter(assessment_type=2)
+        phi_narratives = Narrative.objects.filter(assessment_type=3)
+
+        if ext_narratives.values_list().count() == 0:
+            missing_narrative_type.append("External")
+        if phi_narratives.values_list().count() == 0:
+            missing_narrative_type.append("Phishing")
+        if report.report_type == "RVA" and int_narratives.values_list().count() == 0:
+            missing_narrative_type.append("Internal")
+
+        context['missing_narrative_type'] = ', '.join(missing_narrative_type)
+
+        for n in ext_narratives:
+            steps = NarrativeStep.objects.filter(narrative=n)
+            if n.file == "" or n.caption == "" or n.tools.values_list().count() == 0 or n.attack.values_list().count() == 0 or steps.values_list().count() == 0:
+                missing_narrative_data.append(n.name + " " + str(n.order))
+            else:
+                for s in steps:
+                    if s.description == "":
+                        missing_narrative_data.append(n.name + " " + str(n.order))
+                        break
+                    elif s.file != "" and s.caption == "":
+                        missing_narrative_data.append(n.name + " " + str(n.order))
+                        break
+
+        if report.report_type == "RVA":
+            for n in int_narratives:
+                steps = NarrativeStep.objects.filter(narrative=n)
+                if n.file == "" or n.caption == "" or n.tools.values_list().count() == 0 or n.attack.values_list().count() == 0 or steps.values_list().count() == 0:
+                    missing_narrative_data.append(n.name + " " + str(n.order))
+                else:
+                    for s in steps:
+                        if s.description == "":
+                            missing_narrative_data.append(n.name + " " + str(n.order))
+                            break
+                        elif s.file != "" and s.caption == "":
+                            missing_narrative_data.append(n.name + " " + str(n.order))
+                            break
+
+        for n in phi_narratives:
+            steps = NarrativeStep.objects.filter(narrative=n)
+            if n.file == "" or n.caption == "" or n.tools.values_list().count() == 0 or n.attack.values_list().count() == 0 or steps.values_list().count() == 0:
+                missing_narrative_data.append(n.name + " " + str(n.order))
+            else:
+                for s in steps:
+                    if s.description == "":
+                        missing_narrative_data.append(n.name + " " + str(n.order))
+                        break
+                    elif s.file != "" and s.caption == "":
+                        missing_narrative_data.append(n.name + " " + str(n.order))
+                        break
+
+        context['missing_narrative_data'] = ', '.join(missing_narrative_data)
+
+        missing_services = []
+
+        if PortMappingHost.objects.all().values_list().count() == 0:
+            missing_services.append("Port Mapping")
+        else:
+            for h in PortMappingHost.objects.all():
+                if h.ip == "" or h.hostname == "" or h.ports == "" or h.services == "":
+                    missing_services.append("Port Mapping")
+                    break
+
+        if report.report_type == "RVA":
+            if DataExfil.objects.all().values_list().count() == 0:
+                missing_services.append("Data Exfiltration")
+            else:
+                for d in DataExfil.objects.all():
+                    if d.protocol == "" or d.datatype == "" or d.date_time == None:
+                        missing_services.append("Data Exfiltration")
+                        break
+
+            if RansomwareScenarios.objects.all().values_list().count() == 0 or Ransomware.objects.all().values_list().count() == 0:
+                missing_services.append("Ransomware")
+            else:
+                for r in Ransomware.objects.all():
+                    if not r.disabled:
+                        if r.time_start == None:
+                            missing_services.append("Ransomware")
+                            break
+                    elif r.trigger == "Y" and r.time_end == None:
+                        missing_services.append("Ransomware")
+                        break
+
+        if report.report_type == "RPT":
+            breach_metrics = BreachMetrics.objects.all().first()
+            if BreachMetrics.objects.values_list().count() > 0:
+                if breach_metrics.emails_identified == None or breach_metrics.emails_identified_tp == None or breach_metrics.creds_identified == None or breach_metrics.creds_identified_unique == None or breach_metrics.creds_validated == None:
+                    missing_services.append("OSINF")
+            else:
+                missing_services.append("OSINF")
+            if "OSINF" not in missing_services:
+                for e in BreachedEmail.objects.all():
+                    if e.email_address == "" or e.breach_info == "":
+                        missing_services.append("OSINF")
+                        break
+                        
+        context['missing_services'] = ', '.join(missing_services)
+
+        context['found_kevs'] = KEV.objects.filter(found=True)
+
+        missing_report = False
+
+        if report.report_type == "RVA" or report.report_type == "RPT":
+            if report.significant_findings == "" or report.recommendations == "" or report.observed_strengths == "":
+                missing_report = True
+
+        if report.report_type == "RVA":
+            if report.users_targeted == None or report.external_discovered == None or report.external_scanned == None or report.internal_discovered == None or report.internal_scanned == None or report.password_analysis == "":
+                missing_report = True
+        else:
+            if report.external_discovered == None or report.external_discovered == None:
+                missing_report = True
+
+        context['missing_report'] = missing_report
 
         # NIST_800_53
         context['nist_ac'] = UploadedFinding.objects.filter(
@@ -306,10 +518,10 @@ def export_json(
     asmt_id = engagement_obj.asmt_id
 
     if data == 'standard':
-        json_file = gen_ptp_filename(prefix=f'RV{asmt_id}-data', ext='json')
+        json_file = gen_ptp_filename(prefix=f'VMA{asmt_id}-data', ext='json')
         generateEntryJson(json_file)
     elif data == 'election':
-        json_file = gen_ptp_filename(prefix=f'RV{asmt_id}-election', ext='json')
+        json_file = gen_ptp_filename(prefix=f'VMA{asmt_id}-election', ext='json')
         generateElectionJson(json_file)
     with open(json_file, 'rb') as fh:
         response = HttpResponse(fh.read(), content_type="application/json, application/octet-stream")
@@ -413,14 +625,16 @@ def generate_artifact(artifact_type, anon_report=False):
 
         generate_kev_report(template_name, artifact_name, json_filename, settings.MEDIA_ROOT)
 
+    elif artifact_type == "CSV":
+        content_type = "text/csv"
+        artifact_name = report_type + "-" + asmt_id + "-" + cust_initials + "-" + "Findings" + '.csv'
+        generate_findings_csv(artifact_name, json_filename, settings.MEDIA_ROOT)
+
     elif artifact_type == "Tracker":
         content_type = base_ctype + "spreadsheetml.sheet"
         artifact_name = report_type + "-" + asmt_id + "-" + cust_initials + "-ActivityTracker.xlsx"
 
         create_tracker(artifact_name, json_filename)
-
-    with contextlib.suppress(FileNotFoundError):
-        os.remove(json_filename)
 
     download_file = artifact_name
 
@@ -431,8 +645,13 @@ def generate_artifact(artifact_type, anon_report=False):
                 'Content-Disposition'
             ] = 'attachment; filename=' + os.path.basename(download_file)
 
-    os.remove(download_file)
-    return response
+        os.remove(download_file)
+
+        with contextlib.suppress(FileNotFoundError):
+            os.remove(json_filename)
+        return response
+    else:
+        return HttpResponseServerError()
 
 
 def generate_report(request):
@@ -457,4 +676,7 @@ def generate_pace(request):
 
 def generate_kevs(request):
     return generate_artifact("KEV")
+
+def generate_csv(request):
+    return generate_artifact("CSV")
 

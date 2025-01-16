@@ -63,6 +63,12 @@ class EngagementCreate(generic.edit.CreateView):
 
         return context
 
+    def get(self, *args, **kwargs):
+        if EngagementMeta.objects.all().count() > 0:
+            return redirect(reverse('engagement_update'))
+        else:
+            return super(EngagementCreate, self).get(*args, **kwargs)
+
     def post(self, request, *args, **kwargs):
 
         postData = json.loads(request.body)
@@ -111,9 +117,72 @@ class EngagementUpdate(generic.edit.UpdateView):
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         context['report'] = Report.object()
+        engagement = EngagementMeta.object()
 
         if context['report'].report_type == 'HVA':
             context['hvas'] = HVATarget.objects.all()
+
+        missing_fields = []
+
+        if engagement.customer_long_name == "":
+            missing_fields.append("Stakeholder Name")
+        if engagement.customer_initials == "":
+            missing_fields.append("Stakeholder Abbreviation")
+        if engagement.customer_POC_name == "":
+            missing_fields.append("Point of Contact Name")
+        if engagement.customer_POC_email == "":
+            missing_fields.append("Point of Contact Email")
+        if context['report'].report_type == 'RVA':
+            if engagement.customer_location == "":
+                missing_fields.append("On-Site Testing Address")
+        if engagement.customer_state == "":
+            missing_fields.append("State")
+        if engagement.customer_sector == "":
+            missing_fields.append("Sector")
+        if engagement.customer_ci_type == "":
+            missing_fields.append("Critical Infrastructure Type")
+        if engagement.customer_ci_subsector == "":
+            missing_fields.append("Critical Infrastructure Subsector")
+        if engagement.team_lead_name == "":
+            missing_fields.append("Team Lead Name")
+        if engagement.team_lead_email == "":
+            missing_fields.append("Team Lead Email")
+
+        if context['report'].report_type == 'RVA' or context['report'].report_type == 'RPT':
+            if engagement.phishing_domains == "":
+                missing_fields.append("In Scope Mail Domains for Phishing")
+
+        if context['report'].report_type == 'RVA' or context['report'].report_type == 'FAST':
+            if engagement.ext_start_date == None:
+                missing_fields.append("External Start Date")
+            if engagement.ext_end_date == None:
+                missing_fields.append("External End Date")
+            if engagement.ext_scope == "":
+                missing_fields.append("External In Scope IP Addresses/Domain Names")
+            if engagement.ext_excluded_scope == "":
+                missing_fields.append("External Out of Scope IP Addresses/Domain Names")
+
+        if context['report'].report_type == 'RVA':
+            if engagement.int_start_date == None:
+                missing_fields.append("Internal Start Date")
+            if engagement.int_end_date == None:
+                missing_fields.append("Internal End Date")
+            if engagement.int_scope == "":
+                missing_fields.append("Internal In Scope IP Addresses/Domain Names")
+            if engagement.int_excluded_scope == "":
+                missing_fields.append("Internal Out of Scope IP Addresses/Domain Names")
+
+        if context['report'].report_type == 'RPT':
+            if engagement.ext_scope == "":
+                missing_fields.append("In Scope IP Addresses for Network Penetration Test")
+            if engagement.ext_excluded_scope == "":
+                missing_fields.append("Out of Scope IP Addresses for Network Penetration Test")
+            if engagement.web_app_scope == "":
+                missing_fields.append("In Scope Web Applications")
+            if engagement.osinf_scope == "":
+                missing_fields.append("In Scope Domains for OSINF")
+
+        context['missing'] = ', '.join(missing_fields)
 
         return context
 
@@ -175,6 +244,70 @@ class EngagementDetail(generic.DetailView):
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         context['report'] = Report.object()
+        engagement = EngagementMeta.object()
         if context['report'].report_type == 'HVA':
             context['hvas'] = HVATarget.objects.all()
+
+        missing_fields = []
+
+        if engagement.customer_long_name == "":
+            missing_fields.append("Stakeholder Name")
+        if engagement.customer_initials == "":
+            missing_fields.append("Stakeholder Abbreviation")
+        if engagement.customer_POC_name == "":
+            missing_fields.append("Point of Contact Name")
+        if engagement.customer_POC_email == "":
+            missing_fields.append("Point of Contact Email")
+        if context['report'].report_type == 'RVA':
+            if engagement.customer_location == "":
+                missing_fields.append("On-Site Testing Address")
+        if engagement.customer_state == "":
+            missing_fields.append("State")
+        if engagement.customer_sector == "":
+            missing_fields.append("Sector")
+        if engagement.customer_ci_type == "":
+            missing_fields.append("Critical Infrastructure Type")
+        if engagement.customer_ci_subsector == "":
+            missing_fields.append("Critical Infrastructure Subsector")
+        if engagement.team_lead_name == "":
+            missing_fields.append("Team Lead Name")
+        if engagement.team_lead_email == "":
+            missing_fields.append("Team Lead Email")
+
+        if context['report'].report_type == 'RVA' or context['report'].report_type == 'RPT':
+            if engagement.phishing_domains == "":
+                missing_fields.append("In Scope Mail Domains for Phishing")
+
+        if context['report'].report_type == 'RVA' or context['report'].report_type == 'FAST':
+            if engagement.ext_start_date == None:
+                missing_fields.append("External Start Date")
+            if engagement.ext_end_date == None:
+                missing_fields.append("External End Date")
+            if engagement.ext_scope == "":
+                missing_fields.append("External In Scope IP Addresses/Domain Names")
+            if engagement.ext_excluded_scope == "":
+                missing_fields.append("External Out of Scope IP Addresses/Domain Names")
+
+        if context['report'].report_type == 'RVA':
+            if engagement.int_start_date == None:
+                missing_fields.append("Internal Start Date")
+            if engagement.int_end_date == None:
+                missing_fields.append("Internal End Date")
+            if engagement.int_scope == "":
+                missing_fields.append("Internal In Scope IP Addresses/Domain Names")
+            if engagement.int_excluded_scope == "":
+                missing_fields.append("Internal Out of Scope IP Addresses/Domain Names")
+
+        if context['report'].report_type == 'RPT':
+            if engagement.ext_scope == "":
+                missing_fields.append("In Scope IP Addresses for Network Penetration Test")
+            if engagement.ext_excluded_scope == "":
+                missing_fields.append("Out of Scope IP Addresses for Network Penetration Test")
+            if engagement.web_app_scope == "":
+                missing_fields.append("In Scope Web Applications")
+            if engagement.osinf_scope == "":
+                missing_fields.append("In Scope Domains for OSINF")
+
+        context['missing'] = ', '.join(missing_fields)
+        
         return context

@@ -21,6 +21,8 @@ import os.path
 import argparse
 import datetime
 import inflect
+import re
+from decimal import *
 
 from datetime import timezone
 from dateutil.relativedelta import relativedelta
@@ -34,10 +36,13 @@ from docx.enum.table import WD_TABLE_ALIGNMENT
 from PIL import Image
 
 from .mam_xml import *  # mitre att&ck matrix
+from ptportal.models import UploadedFinding
 import report_gen.mam_xml as mam_xml
 import report_gen.utilities.assessment_facts as af
 import report_gen.utilities.xml_util as xu
 import report_gen.utilities.rt_parser as rtp
+
+import math
 
 try:
     import docx
@@ -51,6 +56,13 @@ tstamp = str(datetime.datetime.now().strftime("%Y%m%d_%H.%M.%S"))
 today = datetime.date.today()
 num = inflect.engine()
 
+def fix_double_spaces_in_run(run):
+    run_text = run.text
+    # Ensure we only replace ".  " followed by an uppercase letter
+    new_text = re.sub(r'\.  +([A-Z])', r'. \1', run_text)
+    # Only update the run text if there was a change
+    if new_text != run_text:
+        run.text = new_text
 
 def insert_assessment_info(doc, db):
     """Function that fills out the tags on the report cover.
@@ -62,8 +74,9 @@ def insert_assessment_info(doc, db):
 
     asmt_id = af.get_db_info(db, 'engagementmeta.fields.asmt_id', '{ASMT ID}')
     stakeholder_name = af.get_db_info(db, 'engagementmeta.fields.customer_long_name', '{STAKEHOLDER NAME}')
+    customer_state = af.get_db_info(db, 'engagementmeta.fields.customer_state', '{Customer State}')
 
-    subtitle = "RV" + asmt_id + " - " + stakeholder_name
+    subtitle = "VMA" + asmt_id + " - " + stakeholder_name
 
     p_tag = xu.find_paragraph(doc, "{REPORT SUBTITLE}")
     if p_tag is not None:
@@ -73,14 +86,32 @@ def insert_assessment_info(doc, db):
     if p_tag is not None:
         p_tag.text = today.strftime("%B %-d, %Y")
 
+    # Modify your code to insert the hyperlink
+    p_tag = xu.find_paragraph(doc, "{CSA REGIONAL EMAIL}")
+    if p_tag is not None:
+        # Get the email address to insert
+        email = af.get_region_email(customer_state)
+        mailto_link = f"mailto:{email}"
+        
+        # Clear the placeholder text in the paragraph
+        p_tag.text = p_tag.text.replace("{CSA REGIONAL EMAIL}.", "")
+        
+        # Add the email as a mailto hyperlink
+        af.add_hyperlink(p_tag, email, mailto_link)
+        p_tag.add_run('.')
+        # p_tag = xu.find_paragraph(doc, "{CSA REGIONAL EMAIL}")
+        # if p_tag is not None:
+        #     p_tag.text = p_tag.text.replace("{CSA REGIONAL EMAIL}", af.get_region_email(customer_state))
 
-def insert_fs_table(doc, db, fs_tag):
+
+def insert_fs_table(doc, db, fs_tag, mitigated=None):
     """Generates and inserts the findings summary table.
 
     Args:
         doc (docx document): The docx template being edited.
         db (list): Assessment data
         fs_tag (string): The string in the docx document that will be replaced with the table.
+        mitigated (bool): If True, only include mitigated findings. If False, only include non-mitigated findings. Include all findings by default.
     """
 
     # Find tag location in document
@@ -90,7 +121,13 @@ def insert_fs_table(doc, db, fs_tag):
     if p_tag is None:
         return
 
-    fs_table = doc.add_table(1, 4)
+    report_type = af.get_db_info(db, 'report.fields.report_type', '{REPORT TYPE}')
+
+    if report_type == "FAST":
+        fs_table = doc.add_table(1, 5)
+    else:
+        fs_table = doc.add_table(1, 4)
+    
     fs_table.style = doc.styles['Findings Table']
 
     fs_table.cell(0, 0).text = ""
@@ -102,27 +139,34 @@ def insert_fs_table(doc, db, fs_tag):
     fs_table.cell(0, 3).text = "Mitigation Status"
     fs_table.cell(0, 3).alignment = WD_ALIGN_PARAGRAPH.CENTER
 
-    for cnt, finding in enumerate(af.model_gen(db, "ptportal.uploadedfinding")):
-        ele = finding['fields']
+    if report_type == "FAST":
+        fs_table.cell(0, 4).text = "Affected Systems"
+        fs_table.cell(0, 4).alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+    if mitigated is not None:
+        findings = UploadedFinding.objects.filter(unmitigated__gt=0).order_by('severity', 'assessment_type', 'uploaded_finding_name', 'created_at')
+    else:
+        findings = UploadedFinding.objects.all().order_by('severity', 'assessment_type', 'uploaded_finding_name', 'created_at')
+
+    for cnt, finding in enumerate(findings, start=1):
         row = fs_table.add_row()
 
-        fid = str(cnt + 1)
-        fname = ele['uploaded_finding_name']
+        finding_row = str(cnt)
 
-        severity = ele['severity']
+        severity = str(finding.severity)
 
-        if ele['mitigation']:
-            mitigation = "Mitigated"
+        if finding.duplicate_finding_order > 0:
+            uploaded_finding_name = finding.uploaded_finding_name + " " + str(finding.duplicate_finding_order)
         else:
-            mitigation = "Not Mitigated"
+            uploaded_finding_name = finding.uploaded_finding_name
 
-        fs_table.cell(cnt + 1, 0).text = fid
-        fs_table.cell(cnt + 1, 0).paragraphs[0].runs[0].font.bold = True
-        fs_table.cell(cnt + 1, 0).paragraphs[0].runs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
-        fs_table.cell(cnt + 1, 1).text = fname
-        fs_table.cell(cnt + 1, 1).paragraphs[0].runs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+        fs_table.cell(cnt, 0).text = finding_row
+        fs_table.cell(cnt, 0).paragraphs[0].runs[0].font.bold = True
+        fs_table.cell(cnt, 0).paragraphs[0].runs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+        fs_table.cell(cnt, 1).text = uploaded_finding_name
+        fs_table.cell(cnt, 1).paragraphs[0].runs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
 
-        sev_cell = fs_table.cell(cnt + 1, 2).paragraphs[0]
+        sev_cell = fs_table.cell(cnt, 2).paragraphs[0]
 
         if severity == "Critical":
             sev_cell.add_run("• ").font.color.rgb = RGBColor(255, 116, 113)
@@ -136,21 +180,45 @@ def insert_fs_table(doc, db, fs_tag):
             sev_cell.add_run("• ").font.color.rgb = RGBColor(79, 175, 227)
 
         sev_cell.add_run(severity)
-        fs_table.cell(cnt + 1, 2).paragraphs[0].runs[0].font.bold = True
-        fs_table.cell(cnt + 1, 2).paragraphs[0].runs[1].font.bold = True
-        fs_table.cell(cnt + 1, 2).paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+        fs_table.cell(cnt, 2).paragraphs[0].runs[0].font.bold = True
+        fs_table.cell(cnt, 2).paragraphs[0].runs[1].font.bold = True
+        fs_table.cell(cnt, 2).paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
 
-        mit_cell = fs_table.cell(cnt + 1, 3).paragraphs[0]
+        mit_cell = fs_table.cell(cnt, 3).paragraphs[0]
 
-        if mitigation == "Mitigated":
-            mit_cell.add_run("• ").font.color.rgb = RGBColor(131, 224, 142)
-        else:
+        if finding.unmitigated == 1:
             mit_cell.add_run("• ").font.color.rgb = RGBColor(255, 116, 113)
+            mitigation = "Not Mitigated"
+        elif finding.unmitigated > 0:
+            mit_cell.add_run("• ").font.color.rgb = RGBColor(255, 222, 89)
+            mitigation = "Partially Mitigated"
+        else:
+            mit_cell.add_run("• ").font.color.rgb = RGBColor(131, 224, 142)
+            mitigation = "Mitigated"
+            
 
         mit_cell.add_run(mitigation)
-        fs_table.cell(cnt + 1, 3).paragraphs[0].runs[0].font.bold = True
-        fs_table.cell(cnt + 1, 3).paragraphs[0].runs[1].font.bold = True
-        fs_table.cell(cnt + 1, 3).paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+        fs_table.cell(cnt, 3).paragraphs[0].runs[0].font.bold = True
+        fs_table.cell(cnt, 3).paragraphs[0].runs[1].font.bold = True
+        fs_table.cell(cnt, 3).paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+        if report_type == "FAST":
+            as_cell = fs_table.cell(cnt, 4).paragraphs[0]
+
+            as_info = af.build_affected_systems_info(db)
+            as_info = {k: xu.xsafe(v) for k, v in as_info.items()}
+            keys = [affected_system.id for affected_system in finding.affected_systems.all()]
+            affected_systems = af.find_affected_systems(as_info, keys)
+            
+            p = as_cell._p
+            pPr = OxmlElement('w:pPr')
+            wordWrap = OxmlElement('w:wordWrap')
+            wordWrap.set(qn('w:val'), 'off')
+            pPr.append(wordWrap)
+            p.append(pPr)
+            as_cell.add_run(affected_systems)
+
+            fs_table.cell(cnt, 4).paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
 
     fs_table.cell(0, 0).paragraphs[0].runs[0].font.color.rgb = RGBColor(255, 255, 255)
     fs_table.cell(0, 0).paragraphs[0].runs[0].font.bold = True
@@ -161,10 +229,20 @@ def insert_fs_table(doc, db, fs_tag):
     fs_table.cell(0, 3).paragraphs[0].runs[0].font.color.rgb = RGBColor(255, 255, 255)
     fs_table.cell(0, 3).paragraphs[0].runs[0].font.bold = True
 
-    xu.set_column_width(fs_table.columns[0], 0.38)
-    xu.set_column_width(fs_table.columns[1], 3.38)
-    xu.set_column_width(fs_table.columns[2], 1.38)
-    xu.set_column_width(fs_table.columns[3], 1.37)
+    if report_type == "FAST":
+        fs_table.cell(0, 4).paragraphs[0].runs[0].font.color.rgb = RGBColor(255, 255, 255)
+        fs_table.cell(0, 4).paragraphs[0].runs[0].font.bold = True
+        xu.set_column_width(fs_table.columns[0], 0.35)
+        xu.set_column_width(fs_table.columns[1], 1.61)
+        xu.set_column_width(fs_table.columns[2], 1.11)
+        xu.set_column_width(fs_table.columns[3], 1.2)
+        xu.set_column_width(fs_table.columns[4], 2.15)
+
+    else:
+        xu.set_column_width(fs_table.columns[0], 0.38)
+        xu.set_column_width(fs_table.columns[1], 3.38)
+        xu.set_column_width(fs_table.columns[2], 1.38)
+        xu.set_column_width(fs_table.columns[3], 1.37)
 
     xu.move_table_after(fs_table, p_tag)
     xu.delete_paragraph(p_tag)
@@ -305,14 +383,16 @@ def insert_cis_csc_table(doc, db, cis_csc_tag):
     xu.delete_paragraph(p_tag)
 
 
-def insert_df_table(doc, db, df_tag, media_path):
-    """Generates the NCATS Detailed findings table for each finding that is listed/added to the report.
+def insert_df_table(doc, db, df_tag, media_path, mitigated=None):
+    """Generates the NCATS Detailed findings table for each finding that is listed/added to the report
+        with the selected mitigation status.
 
     Args:
         doc (docx document): The docx template being edited.
         db (list): Assessment data
         df_tag (string): The string inside of the docx document that will be replaced with the tables.
         media_path (string): Path to the location where the report screenshots are.
+        mitigated (bool): If True, only include mitigated findings. If False, only include non-mitigated findings. Include all findings if None.
     """
 
     p_tag = xu.find_paragraph(doc, df_tag)
@@ -322,26 +402,25 @@ def insert_df_table(doc, db, df_tag, media_path):
 
     current_mark = p_tag
 
+    report_type = af.get_db_info(db, 'report.fields.report_type', '{REPORT TYPE}')
+
     # ---- find all screenshot information
     ss_info = af.build_screenshot_info(db)
     as_info = af.build_affected_systems_info(db)
     # make sure the affected systems are xml safe
     as_info = {k: xu.xsafe(v) for k, v in as_info.items()}
 
-    for cnt, finding in enumerate(af.model_gen(db, "ptportal.uploadedfinding")):
-        ele = finding['fields']
+    if mitigated is not None:
+        findings = UploadedFinding.objects.filter(unmitigated__gt=0).order_by('severity', 'assessment_type', 'uploaded_finding_name', 'created_at')
+    else:
+        findings = UploadedFinding.objects.all().order_by('severity', 'assessment_type', 'uploaded_finding_name', 'created_at')
 
-        fpk = finding['pk']
-        fid = str(cnt + 1)
-        fname = ele['uploaded_finding_name']
+    for cnt, finding in enumerate(findings, start=1):
+        fpk = finding.id
+        finding_row = str(cnt)
 
-        severity = ele['severity']
-        assessment_type = ele['assessment_type']
-
-        if ele['mitigation']:
-            mitigation = "Mitigated"
-        else:
-            mitigation = "Not Mitigated"
+        severity = str(finding.severity)
+        assessment_type = finding.assessment_type
 
         finding_sshot = af.find_screenshots(ss_info, fpk)
 
@@ -349,22 +428,38 @@ def insert_df_table(doc, db, df_tag, media_path):
         if len(finding_sshot) == 0:
             ptp_df_screenshot_note = "No relevant screenshots exist for this finding."
         else:
-            ptp_df_screenshot_note = ele['screenshot_description']
+            ptp_df_screenshot_note = finding.screenshot_description
 
         # ---- build the affected systems string
-        affected_systems = af.find_affected_systems(as_info, ele['affected_systems'])
+        keys = [affected_system.id for affected_system in finding.affected_systems.all()]
+        affected_systems = af.find_affected_systems(as_info, keys)
 
-        df_table = doc.add_table(12, 5)
+        if report_type == 'FAST':
+            df_table = doc.add_table(13, 5)
+        else:
+            df_table = doc.add_table(12, 5)
         df_table.style = doc.styles['Findings Table']
 
-        df_table.cell(0, 0).text = "ID"
-        df_table.cell(0, 1).text = "Finding"
-        df_table.cell(0, 2).text = "Severity"
-        df_table.cell(0, 3).text = "Type"
-        df_table.cell(0, 4).text = "Mitigation Status"
+        if finding.duplicate_finding_order > 0:
+            uploaded_finding_name = finding.uploaded_finding_name + " " + str(finding.duplicate_finding_order)
+        else:
+            uploaded_finding_name = finding.uploaded_finding_name
 
-        df_table.cell(1, 0).text = fid
-        df_table.cell(1, 1).text = xu.xsafe(fname)
+        df_table.cell(0, 0).text = "ID"
+        df_table.cell(0, 0).paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+        df_table.cell(0, 1).text = "Finding"
+        df_table.cell(0, 1).paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+        df_table.cell(0, 2).text = "Severity"
+        df_table.cell(0, 2).paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+        df_table.cell(0, 3).text = "Type"
+        df_table.cell(0, 3).paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+        df_table.cell(0, 4).text = "Mitigation Status"
+        df_table.cell(0, 4).paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+
+        df_table.cell(1, 0).text = finding_row
+        df_table.cell(1, 0).paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+        df_table.cell(1, 1).text = xu.xsafe(uploaded_finding_name)
+        df_table.cell(1, 1).paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
         #df_table.cell(1, 2).text = "• " + xu.xsafe(severity)
         sev_cell = df_table.cell(1, 2).paragraphs[0]
         
@@ -382,18 +477,26 @@ def insert_df_table(doc, db, df_tag, media_path):
         sev_cell.add_run(xu.xsafe(severity))
         df_table.cell(1, 2).paragraphs[0].runs[0].font.bold = True
         df_table.cell(1, 2).paragraphs[0].runs[1].font.bold = True
+        df_table.cell(1, 2).paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
         df_table.cell(1, 3).text = xu.xsafe(assessment_type)
+        df_table.cell(1, 3).paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
 
         mit_cell = df_table.cell(1, 4).paragraphs[0]
 
-        if mitigation == "Mitigated":
-            mit_cell.add_run("• ").font.color.rgb = RGBColor(131, 224, 142)
-        else:
+        if finding.unmitigated == 1:
             mit_cell.add_run("• ").font.color.rgb = RGBColor(255, 116, 113)
+            mitigation = "Not Mitigated"
+        elif finding.unmitigated > 0:
+            mit_cell.add_run("• ").font.color.rgb = RGBColor(255, 222, 89)
+            mitigation = "Partially Mitigated"
+        else:
+            mit_cell.add_run("• ").font.color.rgb = RGBColor(131, 224, 142)
+            mitigation = "Mitigated"
 
         mit_cell.add_run(xu.xsafe(mitigation))
         df_table.cell(1, 4).paragraphs[0].runs[0].font.bold = True
         df_table.cell(1, 4).paragraphs[0].runs[1].font.bold = True
+        df_table.cell(1, 4).paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
 
         for i in range(0, 5):
             df_table.cell(0, i).paragraphs[0].runs[0].font.color.rgb = RGBColor(255, 255, 255)
@@ -410,79 +513,111 @@ def insert_df_table(doc, db, df_tag, media_path):
             if i < 4:
                 xu.set_cell_border(df_table.cell(1, i), end={"sz": 8, "val": "single", "color": "#000000"})
 
-        df_table.cell(2, 0).merge(df_table.cell(2, 4))
-        df_table.cell(2, 0).text = "Affected Systems"
-        df_table.cell(2, 0).paragraphs[0].runs[0].font.color.rgb = RGBColor(3, 82, 136)
-        df_table.cell(2, 0).paragraphs[0].runs[0].font.bold = True
-        df_table.cell(2, 0).paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.LEFT
-        xu.set_cell_border(df_table.cell(2, 0), bottom={"sz": 8, "val": "single", "color": "#BFBFBF"})
-        df_table.cell(3, 0).merge(df_table.cell(3, 4))
-        df_table.cell(3, 0).text = affected_systems
-        df_table.cell(3, 0).paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.LEFT
+        if report_type == 'FAST':
+            row_count = 1
+            disc_date = datetime.datetime.strptime(str(finding.created_at)[:10], '%Y-%m-%d').strftime("%B %-d, %Y")
+            lv_date = datetime.datetime.strptime(str(finding.last_validated), '%Y-%m-%d').strftime("%B %-d, %Y")
+            
+            df_table.cell(2, 0).merge(df_table.cell(2, 4))
+            df_table.cell(2, 0)._element.clear_content()
+            df_dates = df_table.cell(2, 0).add_table(2, 2)
+            df_dates.style = doc.styles['Findings Table2']
+            df_dates.cell(0, 0).paragraphs[0].add_run("First Discovered")
+            df_dates.cell(0, 1).paragraphs[0].add_run("Last Validated")
+            df_dates.cell(1, 0).paragraphs[0].add_run(disc_date)
+            df_dates.cell(1, 1).paragraphs[0].add_run(lv_date)
+            df_dates.cell(0, 0).paragraphs[0].runs[0].font.color.rgb = RGBColor(3, 82, 136)
+            df_dates.cell(0, 1).paragraphs[0].runs[0].font.color.rgb = RGBColor(3, 82, 136)
+            df_dates.cell(0, 0).paragraphs[0].runs[0].font.bold = True
+            df_dates.cell(0, 1).paragraphs[0].runs[0].font.bold = True
+            
+            df_dates.cell(1, 0).paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+            df_dates.cell(1, 1).paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+            xu.set_cell_border(df_dates.cell(0, 0), end={"sz": 8, "val": "single", "color": "#000000"})
+            xu.set_cell_border(df_dates.cell(0, 0), bottom={"sz": 8, "val": "single", "color": "#BFBFBF"})
+            xu.set_cell_border(df_dates.cell(0, 1), bottom={"sz": 8, "val": "single", "color": "#BFBFBF"})
+            xu.set_cell_border(df_dates.cell(1, 0), end={"sz": 8, "val": "single", "color": "#000000"})
+            xu.set_cell_border(df_dates.cell(1, 0), bottom={"sz": 8, "val": "single", "color": "#FFFFFF"})
+            xu.set_cell_border(df_dates.cell(1, 1), bottom={"sz": 8, "val": "single", "color": "#FFFFFF"})
+            xu.set_cell_border(df_table.cell(2, 0), bottom={"sz": 8, "val": "single", "color": "#000000"})
+            xu.set_column_width(df_dates.columns[0], 3.25)
+            xu.set_column_width(df_dates.columns[1], 3.25)
+        else:
+            row_count = 0
 
-        df_table.cell(4, 0).merge(df_table.cell(4, 4))
-        df_table.cell(4, 0).text = "Description"
-        df_table.cell(4, 0).paragraphs[0].runs[0].font.color.rgb = RGBColor(3, 82, 136)
-        df_table.cell(4, 0).paragraphs[0].runs[0].font.bold = True
-        df_table.cell(4, 0).paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.LEFT
-        xu.set_cell_border(df_table.cell(4, 0), bottom={"sz": 8, "val": "single", "color": "#BFBFBF"})
-        df_table.cell(5, 0).merge(df_table.cell(5, 4))
-        df_table.cell(5, 0).text = xu.xsafe(ele['description'])
-        df_table.cell(5, 0).paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.LEFT
+        df_table.cell(2 + row_count, 0).merge(df_table.cell(2 + row_count, 4))
+        df_table.cell(2 + row_count, 0).text = "Affected Systems"
+        df_table.cell(2 + row_count, 0).paragraphs[0].runs[0].font.color.rgb = RGBColor(3, 82, 136)
+        df_table.cell(2 + row_count, 0).paragraphs[0].runs[0].font.bold = True
+        df_table.cell(2 + row_count, 0).paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+        xu.set_cell_border(df_table.cell(2 + row_count, 0), bottom={"sz": 8, "val": "single", "color": "#BFBFBF"})
+        df_table.cell(3 + row_count, 0).merge(df_table.cell(3 + row_count, 4))
+        df_table.cell(3 + row_count, 0).text = affected_systems
+        df_table.cell(3 + row_count, 0).paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.LEFT
 
-        df_table.cell(6, 0).merge(df_table.cell(6, 4))
-        df_table.cell(6, 0).text = "Recommended Mitigation"
-        df_table.cell(6, 0).paragraphs[0].runs[0].font.color.rgb = RGBColor(3, 82, 136)
-        df_table.cell(6, 0).paragraphs[0].runs[0].font.bold = True
-        df_table.cell(6, 0).paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.LEFT
-        xu.set_cell_border(df_table.cell(6, 0), bottom={"sz": 8, "val": "single", "color": "#BFBFBF"})
-        df_table.cell(7, 0).merge(df_table.cell(7, 4))
-        df_table.cell(7, 0).text = xu.xsafe(ele['remediation'])
-        df_table.cell(7, 0).paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.LEFT
+        df_table.cell(4 + row_count, 0).merge(df_table.cell(4 + row_count, 4))
+        df_table.cell(4 + row_count, 0).text = "Description"
+        df_table.cell(4 + row_count, 0).paragraphs[0].runs[0].font.color.rgb = RGBColor(3, 82, 136)
+        df_table.cell(4 + row_count, 0).paragraphs[0].runs[0].font.bold = True
+        df_table.cell(4 + row_count, 0).paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+        xu.set_cell_border(df_table.cell(4 + row_count, 0), bottom={"sz": 8, "val": "single", "color": "#BFBFBF"})
+        df_table.cell(5 + row_count, 0).merge(df_table.cell(5 + row_count, 4))
+        df_table.cell(5 + row_count, 0).text = xu.xsafe(finding.description)
+        df_table.cell(5 + row_count, 0).paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
 
-        df_table.cell(8, 0).merge(df_table.cell(8, 4))
-        df_table.cell(8, 0).text = xu.xsafe(ptp_df_screen_text)
-        df_table.cell(8, 0).paragraphs[0].runs[0].font.color.rgb = RGBColor(3, 82, 136)
-        df_table.cell(8, 0).paragraphs[0].runs[0].font.bold = True
-        df_table.cell(8, 0).paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.LEFT
-        xu.set_cell_border(df_table.cell(8, 0), bottom={"sz": 8, "val": "single", "color": "#BFBFBF"})
-        df_table.cell(9, 0).merge(df_table.cell(9, 4))
-        df_table.cell(9, 0).paragraphs[0].text = ptp_df_screenshot_note
-        df_table.cell(9, 0).paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.LEFT
+        df_table.cell(6 + row_count, 0).merge(df_table.cell(6 + row_count, 4))
+        df_table.cell(6 + row_count, 0).text = "Recommended Mitigation"
+        df_table.cell(6 + row_count, 0).paragraphs[0].runs[0].font.color.rgb = RGBColor(3, 82, 136)
+        df_table.cell(6 + row_count, 0).paragraphs[0].runs[0].font.bold = True
+        df_table.cell(6 + row_count, 0).paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+        xu.set_cell_border(df_table.cell(6 + row_count, 0), bottom={"sz": 8, "val": "single", "color": "#BFBFBF"})
+        df_table.cell(7 + row_count, 0).merge(df_table.cell(7 + row_count, 4))
+        df_table.cell(7 + row_count, 0).text = xu.xsafe(finding.remediation)
+        df_table.cell(7 + row_count, 0).paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
 
-        df_table.cell(10, 0).merge(df_table.cell(10, 4))
-        df_table.cell(10, 0).text = "Security References"
-        df_table.cell(10, 0).paragraphs[0].runs[0].font.color.rgb = RGBColor(3, 82, 136)
-        df_table.cell(10, 0).paragraphs[0].runs[0].font.bold = True
-        df_table.cell(10, 0).paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.LEFT
-        xu.set_cell_border(df_table.cell(10, 0), bottom={"sz": 8, "val": "single", "color": "#BFBFBF"})
-        df_table.cell(11, 0).merge(df_table.cell(11, 4))
+        df_table.cell(8 + row_count, 0).merge(df_table.cell(8 + row_count, 4))
+        df_table.cell(8 + row_count, 0).text = xu.xsafe(ptp_df_screen_text)
+        df_table.cell(8 + row_count, 0).paragraphs[0].runs[0].font.color.rgb = RGBColor(3, 82, 136)
+        df_table.cell(8 + row_count, 0).paragraphs[0].runs[0].font.bold = True
+        df_table.cell(8 + row_count, 0).paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+        xu.set_cell_border(df_table.cell(8 + row_count, 0), bottom={"sz": 8, "val": "single", "color": "#BFBFBF"})
+        df_table.cell(9 + row_count, 0).merge(df_table.cell(9 + row_count, 4))
+        df_table.cell(9 + row_count, 0).paragraphs[0].text = ptp_df_screenshot_note
+        df_table.cell(9 + row_count, 0).paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
 
-        if len(ele['KEV']) > 0:
-            kev = df_table.cell(11, 0).paragraphs[0]
+        df_table.cell(10 + row_count, 0).merge(df_table.cell(10 + row_count, 4))
+        df_table.cell(10 + row_count, 0).text = "Security References"
+        df_table.cell(10 + row_count, 0).paragraphs[0].runs[0].font.color.rgb = RGBColor(3, 82, 136)
+        df_table.cell(10 + row_count, 0).paragraphs[0].runs[0].font.bold = True
+        df_table.cell(10 + row_count, 0).paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+        xu.set_cell_border(df_table.cell(10 + row_count, 0), bottom={"sz": 8, "val": "single", "color": "#BFBFBF"})
+        df_table.cell(11 + row_count, 0).merge(df_table.cell(11 + row_count, 4))
+
+        if finding.KEV.count() > 0:
+            kev = df_table.cell(11 + row_count, 0).paragraphs[0]
             kev.add_run("This finding is a ")
             kev.add_run("Known Exploited Vulnerability.\n").bold = True
 
-        nist_800 = df_table.cell(11, 0).paragraphs[0]
+        nist_800 = df_table.cell(11 + row_count, 0).paragraphs[0]
         nist_800.add_run("NIST 800-53: ").bold = True
-        nist_800.add_run(str(ele['NIST_800_53']) + '\n')
-        nist_csf = df_table.cell(11, 0).paragraphs[0]
+        nist_800.add_run(str(finding.NIST_800_53) + '\n')
+        nist_csf = df_table.cell(11 + row_count, 0).paragraphs[0]
         nist_csf.add_run("NIST CSF: ").bold = True
-        nist_csf.add_run(str(ele['NIST_CSF']))
-        df_table.cell(11, 0).paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.LEFT
+        nist_csf.add_run(str(finding.NIST_CSF))
+        df_table.cell(11 + row_count, 0).paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.LEFT
 
         xu.set_column_width(df_table.columns[0], 0.42)
         xu.set_column_width(df_table.columns[1], 2.22)
-        xu.set_column_width(df_table.columns[2], 1.23)
-        xu.set_column_width(df_table.columns[3], 1.25)
-        xu.set_column_width(df_table.columns[4], 1.32)
+        xu.set_column_width(df_table.columns[2], 1.17)
+        xu.set_column_width(df_table.columns[3], 1.19)
+        xu.set_column_width(df_table.columns[4], 1.44)
 
         page_break = doc.add_paragraph()
         page_break.add_run().add_break(WD_BREAK.PAGE)
         current_mark._p.addnext(page_break._p)
         xu.move_table_after(df_table, current_mark)
 
-        screenshot_cell = df_table.cell(9, 0)
+        screenshot_cell = df_table.cell(9 + row_count, 0)
         for sshot in finding_sshot:
             ssf = sshot['fields']
             sfile = media_path + ssf['file']
@@ -510,6 +645,191 @@ def insert_df_table(doc, db, df_tag, media_path):
 
         # now delete the temporary screenshot xml tag
         current_mark = page_break
+
+    # ---- remove the paragraph containing the tag
+    xu.delete_paragraph(p_tag)
+
+
+def insert_mitigated_df_table(doc, db, df_tag, count):
+    """Generates the NCATS Mitigated Detailed findings table for each finding that is listed/added to the report
+
+    Args:
+        doc (docx document): The docx template being edited.
+        db (list): Assessment data
+        df_tag (string): The string inside of the docx document that will be replaced with the tables.
+        media_path (string): Path to the location where the report screenshots are.
+    """
+
+    p_tag = xu.find_paragraph(doc, df_tag)
+
+    if p_tag is None:
+        return
+
+    current_mark = p_tag
+
+    as_info = af.build_affected_systems_info(db)
+    # make sure the affected systems are xml safe
+    as_info = {k: xu.xsafe(v) for k, v in as_info.items()}
+
+
+    findings = UploadedFinding.objects.filter(unmitigated=Decimal(0.00)).order_by('severity', 'assessment_type', 'uploaded_finding_name', 'created_at')
+
+    for cnt, finding in enumerate(findings, start=1):
+        finding_row = str(cnt)
+
+        severity = str(finding.severity)
+        assessment_type = finding.assessment_type
+
+        mitigation = "Mitigated"
+
+        # ---- build the affected systems string
+        keys = [affected_system.id for affected_system in finding.affected_systems.all()]
+        affected_systems = af.find_affected_systems(as_info, keys)
+
+        df_table = doc.add_table(5, 5)
+        df_table.style = doc.styles['Findings Table']
+
+        if finding.duplicate_finding_order > 0:
+            uploaded_finding_name = finding.uploaded_finding_name + " " + str(finding.duplicate_finding_order)
+        else:
+            uploaded_finding_name = finding.uploaded_finding_name
+
+        df_table.cell(0, 0).text = "ID"
+        df_table.cell(0, 0).paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+        df_table.cell(0, 1).text = "Finding"
+        df_table.cell(0, 1).paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+        df_table.cell(0, 2).text = "Severity"
+        df_table.cell(0, 2).paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+        df_table.cell(0, 3).text = "Type"
+        df_table.cell(0, 3).paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+        df_table.cell(0, 4).text = "Mitigation Status"
+        df_table.cell(0, 4).paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+
+        df_table.cell(1, 0).text = finding_row
+        df_table.cell(1, 0).paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+        df_table.cell(1, 1).text = xu.xsafe(uploaded_finding_name)
+        df_table.cell(1, 1).paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+        #df_table.cell(1, 2).text = "• " + xu.xsafe(severity)
+        sev_cell = df_table.cell(1, 2).paragraphs[0]
+
+        if severity == "Critical":
+            sev_cell.add_run("• ").font.color.rgb = RGBColor(255, 116, 113)
+        elif severity == "High":
+            sev_cell.add_run("• ").font.color.rgb = RGBColor(252, 191, 143)
+        elif severity == "Medium":
+            sev_cell.add_run("• ").font.color.rgb = RGBColor(255, 222, 89)
+        elif severity == "Low":
+            sev_cell.add_run("• ").font.color.rgb = RGBColor(131, 224, 142)
+        else:
+            sev_cell.add_run("• ").font.color.rgb = RGBColor(79, 175, 227)
+
+        sev_cell.add_run(xu.xsafe(severity))
+        df_table.cell(1, 2).paragraphs[0].runs[0].font.bold = True
+        df_table.cell(1, 2).paragraphs[0].runs[1].font.bold = True
+        df_table.cell(1, 2).paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+        df_table.cell(1, 3).text = xu.xsafe(assessment_type)
+        df_table.cell(1, 3).paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+
+        mit_cell = df_table.cell(1, 4).paragraphs[0]
+
+        if mitigation == "Mitigated":
+            mit_cell.add_run("• ").font.color.rgb = RGBColor(131, 224, 142)
+        else:
+            mit_cell.add_run("• ").font.color.rgb = RGBColor(255, 116, 113)
+
+        mit_cell.add_run(xu.xsafe(mitigation))
+        df_table.cell(1, 4).paragraphs[0].runs[0].font.bold = True
+        df_table.cell(1, 4).paragraphs[0].runs[1].font.bold = True
+        df_table.cell(1, 4).paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+
+        for i in range(0, 5):
+            df_table.cell(0, i).paragraphs[0].runs[0].font.color.rgb = RGBColor(255, 255, 255)
+            df_table.cell(0, i).paragraphs[0].runs[0].font.bold = True
+            xu.set_cell_border(df_table.cell(0, i), top={"sz": 8, "val": "single", "color": "#000000"})
+            xu.set_cell_border(df_table.cell(0, i), bottom={"sz": 8, "val": "single", "color": "#000000"})
+            if i < 4:
+                xu.set_cell_border(df_table.cell(0, i), end={"sz": 8, "val": "single", "color": "#000000"})
+
+        for i in range(0, 5):
+            df_table.cell(1, i).paragraphs[0].runs[0].font.bold = True
+            xu.set_cell_border(df_table.cell(1, i), top={"sz": 8, "val": "single", "color": "#000000"})
+            xu.set_cell_border(df_table.cell(1, i), bottom={"sz": 8, "val": "single", "color": "#000000"})
+            if i < 4:
+                xu.set_cell_border(df_table.cell(1, i), end={"sz": 8, "val": "single", "color": "#000000"})
+
+        row_count = 1
+        disc_date = datetime.datetime.strptime(str(finding.created_at)[:10], '%Y-%m-%d').strftime("%B %-d, %Y")
+        lv_date = datetime.datetime.strptime(str(finding.last_validated), '%Y-%m-%d').strftime("%B %-d, %Y")
+
+        df_table.cell(2, 0).merge(df_table.cell(2, 4))
+        df_table.cell(2, 0)._element.clear_content()
+        df_dates = df_table.cell(2, 0).add_table(2, 2)
+        df_dates.style = doc.styles['Findings Table2']
+        df_dates.cell(0, 0).paragraphs[0].add_run("First Discovered")
+        df_dates.cell(0, 1).paragraphs[0].add_run("Last Validated")
+        df_dates.cell(1, 0).paragraphs[0].add_run(disc_date)
+        df_dates.cell(1, 1).paragraphs[0].add_run(lv_date)
+        df_dates.cell(0, 0).paragraphs[0].runs[0].font.color.rgb = RGBColor(3, 82, 136)
+        df_dates.cell(0, 1).paragraphs[0].runs[0].font.color.rgb = RGBColor(3, 82, 136)
+        df_dates.cell(0, 0).paragraphs[0].runs[0].font.bold = True
+        df_dates.cell(0, 1).paragraphs[0].runs[0].font.bold = True
+
+        df_dates.cell(1, 0).paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+        df_dates.cell(1, 1).paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+        xu.set_cell_border(df_dates.cell(0, 0), end={"sz": 8, "val": "single", "color": "#000000"})
+        xu.set_cell_border(df_dates.cell(0, 0), bottom={"sz": 8, "val": "single", "color": "#BFBFBF"})
+        xu.set_cell_border(df_dates.cell(0, 1), bottom={"sz": 8, "val": "single", "color": "#BFBFBF"})
+        xu.set_cell_border(df_dates.cell(1, 0), end={"sz": 8, "val": "single", "color": "#000000"})
+        xu.set_cell_border(df_dates.cell(1, 0), bottom={"sz": 8, "val": "single", "color": "#FFFFFF"})
+        xu.set_cell_border(df_dates.cell(1, 1), bottom={"sz": 8, "val": "single", "color": "#FFFFFF"})
+        xu.set_cell_border(df_table.cell(2, 0), bottom={"sz": 8, "val": "single", "color": "#000000"})
+        xu.set_column_width(df_dates.columns[0], 3.25)
+        xu.set_column_width(df_dates.columns[1], 3.25)
+
+        df_table.cell(2 + row_count, 0).merge(df_table.cell(2 + row_count, 4))
+        df_table.cell(2 + row_count, 0).text = "Affected Systems"
+        df_table.cell(2 + row_count, 0).paragraphs[0].runs[0].font.color.rgb = RGBColor(3, 82, 136)
+        df_table.cell(2 + row_count, 0).paragraphs[0].runs[0].font.bold = True
+        df_table.cell(2 + row_count, 0).paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+        xu.set_cell_border(df_table.cell(2 + row_count, 0), bottom={"sz": 8, "val": "single", "color": "#BFBFBF"})
+        df_table.cell(3 + row_count, 0).merge(df_table.cell(3 + row_count, 4))
+        df_table.cell(3 + row_count, 0).text = affected_systems
+        df_table.cell(3 + row_count, 0).paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.LEFT
+
+        xu.set_column_width(df_table.columns[0], 0.42)
+        xu.set_column_width(df_table.columns[1], 2.22)
+        xu.set_column_width(df_table.columns[2], 1.23)
+        xu.set_column_width(df_table.columns[3], 1.25)
+        xu.set_column_width(df_table.columns[4], 1.32)
+
+        # Don't add a page break after the last finding
+        if not cnt == len(findings) and cnt % 2 == 0:
+            page_break = doc.add_paragraph()
+            page_break.add_run().add_break(WD_BREAK.PAGE)
+            current_mark._p.addnext(page_break._p)
+            xu.move_table_after(df_table, current_mark)
+
+            # now delete the temporary screenshot xml tag
+            current_mark = page_break
+        else:
+            space = doc.add_paragraph("", style="Normal")
+            current_mark._p.addnext(space._p)
+            xu.move_table_after(df_table, current_mark)
+
+            # now delete the temporary screenshot xml tag
+            current_mark = space
+    
+    para = doc.add_paragraph("The following findings have been re-tested and validated as remediated.", style="Normal")
+    para.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+    p_tag._p.addnext(para._p)
+
+    letter = chr(ord('A') + count)
+    header = doc.add_paragraph("Appendix " + letter + ": Mitigated Findings", style="Heading 1")
+    p_tag._p.addnext(header._p)
+
+    page_break = doc.add_paragraph()
+    page_break.add_run().add_break(WD_BREAK.PAGE)
+    p_tag._p.addnext(page_break._p)
 
     # ---- remove the paragraph containing the tag
     xu.delete_paragraph(p_tag)
@@ -548,7 +868,7 @@ def insert_rs_table(doc, db, rs_tag, media_path):
     total_label.alignment = WD_ALIGN_PARAGRAPH.CENTER
 
     total_score = score_cell.add_paragraph()
-    total_score.text = str(total_risk_score)
+    total_score.text = format(total_risk_score, ",")
     total_score.style = "RiskScore"
 
     mitigated_label = score_cell.add_paragraph()
@@ -557,7 +877,7 @@ def insert_rs_table(doc, db, rs_tag, media_path):
     mitigated_label.alignment = WD_ALIGN_PARAGRAPH.CENTER
 
     mitigated_score = score_cell.add_paragraph()
-    mitigated_score.text = str(mitigated_risk_score)
+    mitigated_score.text = format(mitigated_risk_score, ",")
     mitigated_score.style = "RiskScore"
 
     blank = score_cell.add_paragraph()
@@ -595,31 +915,49 @@ def insert_rs_table(doc, db, rs_tag, media_path):
     xu.delete_paragraph(p_tag)
 
 
-def insert_pass_analysis(doc, db):
+def insert_pass_analysis(doc, db, count):
     """Inserts the password analysis file into the appendix.
 
     Args:
         doc (Docx object): The docx template.
         db (List of dictionaries): Json of the engagement data.
+        count (integer): Used to determine the Appendix letter
     """
     p_tag = xu.find_paragraph(doc, "{PASSWORD ANALYSIS}")
 
     if p_tag is None:
         return
 
-    p_tag.style = doc.styles['Pass Analysis']
-    p_tag.text = af.get_db_info(db, 'report.fields.password_analysis', 'If password analysis data is available, paste it here. Otherwise, consider removing this section and renaming the subsequent appendices accordingly.')
+    page_break = doc.add_paragraph()
+    page_break.add_run().add_break(WD_BREAK.PAGE)
+    p_tag._p.addnext(page_break._p)
+
+    pass_analysis = doc.add_paragraph(af.get_db_info(db, 'report.fields.password_analysis', 'If password analysis data is available, paste it here. Otherwise, consider removing this section and renaming the subsequent appendices accordingly.'))
+    pass_analysis.style = doc.styles['Pass Analysis']
+    p_tag._p.addnext(pass_analysis._p)
+
+    stakeholder_name = af.get_db_info(db, 'engagementmeta.fields.customer_long_name', '{STAKEHOLDER NAME}')
+    para = doc.add_paragraph(f"CISA obtained the hashed passwords for all the {stakeholder_name} users during the assessment and attempted to obtain the clear text passwords represented by the hashed values. The following output shows statistical analysis of the clear text passwords recovered by the CISA team:", style="Normal")
+    para.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+    p_tag._p.addnext(para._p)
+
+    letter = chr(ord('A') + count)
+    header = doc.add_paragraph("Appendix " + letter + ": Password Analysis", style="Heading 1")
+    p_tag._p.addnext(header._p)
+
+    xu.delete_paragraph(p_tag)
 
 
-def insert_acronyms(doc, db):
+def insert_acronyms(doc, db, count):
     """Inserts list of acronyms into the appendix.
 
     Args:
         doc (Docx object): The docx template.
         db (List of dictionaries): Json of the engagement data.
+        count (integer): Used to determine the Appendix letter
     """
 
-    p_tag = xu.find_paragraph(doc, "{Table: Acronyms}")
+    p_tag = xu.find_paragraph(doc, "{ACRONYMS}")
 
     if p_tag is None:
         return
@@ -652,6 +990,10 @@ def insert_acronyms(doc, db):
     xu.set_column_width(acronym_table.columns[1], 5.23)
 
     xu.move_table_after(acronym_table, p_tag)
+
+    letter = chr(ord('A') + count)
+    header = doc.add_paragraph("Appendix " + letter + ": Abbreviations and Acronyms", style="Heading 1")
+    p_tag._p.addnext(header._p)
     
     xu.delete_paragraph(p_tag)
 
@@ -666,6 +1008,9 @@ def insert_attack_paths(doc, db, media_path):
     """
 
     p_tag = xu.find_paragraph(doc, "{ATTACK PATHS}")
+
+    if p_tag is None:
+        return
 
     techniques = []
 
@@ -698,6 +1043,7 @@ def insert_attack_paths(doc, db, media_path):
                 url = "https://attack.mitre.org/techniques/"
             xu.add_link(b, 0, url, t['name'])
             b.style = "List Bullet 2"
+            b.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
             p_tag._p.addnext(b._p)
 
         mitre = doc.add_paragraph()
@@ -706,6 +1052,7 @@ def insert_attack_paths(doc, db, media_path):
         mitre_end = mitre.add_run(" Techniques were leveraged in this attack path:")
         mitre.runs[1].font.bold = True
         mitre.style = "Normal"
+        mitre.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
         p_tag._p.addnext(mitre._p)
 
         if ele['file']:
@@ -732,23 +1079,29 @@ def insert_attack_paths(doc, db, media_path):
 
             p_tag._p.addnext(diagram._p)
         else:
-            diagram = doc.add_paragraph("<NO ATTACK PATH DIAGRAM>")
-            diagram.alignment = WD_ALIGN_PARAGRAPH.CENTER
             print("No diagram.")
 
         header = doc.add_paragraph(name, style="Heading 2")
         p_tag._p.addnext(header._p)
 
+    para = doc.add_paragraph("Attack paths are used to demonstrate impact by chaining together vulnerabilities and misconfigurations to achieve a significant level of access. The sections below provide a high-level overview of attack paths that the CISA team executed during the engagement and the corresponding MITRE ATT&CK techniques that were leveraged in each attack. A detailed breakdown of each attack path can be found in the Narrative Appendix section.", style="Normal")
+    para.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+    p_tag._p.addnext(para._p)
+
+    header = doc.add_paragraph("Attack Paths", style="Heading 1")
+    p_tag._p.addnext(header._p)
+
     xu.delete_paragraph(p_tag)
 
 
-def insert_narrative(doc, db, media_path):
+def insert_narrative(doc, db, media_path, count):
     """Fills out the narrative section of the report.
 
     Args:
         doc (docx object): The docx template.
         db (List of dictionaries): The JSON of the engagment data.
         media_path (String): Path to the media files.
+        count (integer): Used to determine the Appendix letter
     """
 
     p_tag = xu.find_paragraph(doc, "{NARRATIVE SECTION}")
@@ -952,6 +1305,7 @@ def insert_narrative(doc, db, media_path):
                         p_tag._p.addnext(e_ss._p)
 
                     e_description = doc.add_paragraph(ele['description'], style="Normal")
+                    e_description.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
                     p_tag._p.addnext(e_description._p)
 
             if en['fields']['tools']:
@@ -969,9 +1323,11 @@ def insert_narrative(doc, db, media_path):
                         xu.add_link(b, 2, tool['url'], tool['url'])
                         cb = b.add_run("]")
                     b.style = "List Bullet 2"
+                    b.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
                     p_tag._p.addnext(b._p)
 
                 tool_header = doc.add_paragraph("Relevant Tools:", style="Normal")
+                tool_header.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
                 p_tag._p.addnext(tool_header._p)
 
             e_ap_header = doc.add_paragraph("Attack Path " + str(e_cnt + 1), style="Heading 3")
@@ -979,6 +1335,14 @@ def insert_narrative(doc, db, media_path):
 
         ext_header = doc.add_paragraph("External", style="Heading 2")
         p_tag._p.addnext(ext_header._p)
+
+    para = doc.add_paragraph("This section highlights key tools and techniques the CISA team utilized during testing and can be used to replicate the CISA team’s actions or better understand how a particular finding was identified. These actions should only be replicated by an experienced individual who thoroughly understands the functionality and risks of the tools and techniques.", style="Normal")
+    para.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+    p_tag._p.addnext(para._p)
+
+    letter = chr(ord('A') + count)
+    header = doc.add_paragraph("Appendix " + letter + ": Narrative", style="Heading 1")
+    p_tag._p.addnext(header._p)
 
     xu.delete_paragraph(p_tag)
 
@@ -1040,14 +1404,16 @@ def insert_report_summary(doc, db, media_path):
         ('{ RECOMMENDATIONS }', 'report.fields.recommendations'),
         ('{OBSERVED STRENGTHS}', 'report.fields.observed_strengths'),
     ]
+    
     for bl in bullet_lists:
         p_tag = xu.find_paragraph(doc, bl[0])
         if p_tag is not None:
-            text = af.get_db_info(db, bl[1], "").replace("\r", "\n")
+            text = af.get_db_info(db, bl[1], "").replace("\r\n", "\n")
             for bullet in text.split("\n")[::-1]:
                 para = doc.add_paragraph()
                 para.text = bullet
                 para.style = "List Bullet 2"
+                para.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
                 p_tag._p.addnext(para._p)
             xu.delete_paragraph(p_tag)
 
@@ -1075,9 +1441,12 @@ def insert_report_summary(doc, db, media_path):
         if counts[sev] == 1:
             plural[sev] = "finding"
 
+    total_risk_score_formatted = format(total_risk_score, ",")
+    mitigated_risk_score_formatted = format(mitigated_risk_score, ",")
+
     p_tag = xu.find_paragraph(doc, "{FINDINGS SUMMARY}")
     if p_tag is not None:
-        p_tag.text = f"CISA identified {words['Critical']} ({counts['Critical']}) critical {plural['Critical']}, {words['High']} ({counts['High']}) high {plural['High']}, {words['Medium']} ({counts['Medium']}) medium {plural['Medium']}, {words['Low']} ({counts['Low']}) low {plural['Low']}, and {words['Informational']} ({counts['Informational']}) informational {plural['Informational']}. The Total Risk Score for this assessment is {total_risk_score} and the Mitigated Risk Score after deducting mitigated findings is {mitigated_risk_score}."
+        p_tag.text = f"CISA identified {words['Critical']} ({counts['Critical']}) critical {plural['Critical']}, {words['High']} ({counts['High']}) high {plural['High']}, {words['Medium']} ({counts['Medium']}) medium {plural['Medium']}, {words['Low']} ({counts['Low']}) low {plural['Low']}, and {words['Informational']} ({counts['Informational']}) informational {plural['Informational']}. The Total Risk Score for this assessment is {total_risk_score_formatted} and the Mitigated Risk Score after deducting mitigated findings is {mitigated_risk_score_formatted}."
 
     p_tag = xu.find_paragraph(doc, "{Total Score}")
     if p_tag is not None:
@@ -1099,7 +1468,11 @@ def insert_scope(doc, db):
     p_tag = xu.find_paragraph(doc, "{PHISHING USERS}")
     if p_tag is not None:
         phishing_users = af.get_db_info(db, 'report.fields.users_targeted', '{USERS TARGETED}')
-        p_tag.text = f"{phishing_users} users were included in the phishing campaign(s) targeting the following mail domain(s):"
+        try:
+            phishing_users_formatted = format(phishing_users, ",")
+        except:
+            phishing_users_formatted = '<not set: {USERS TARGETED}>'
+        p_tag.text = f"{phishing_users_formatted} users were included in the phishing campaign(s) targeting the following mail domain(s):"
 
     p_tag = xu.find_paragraph(doc, "{PHISHING DOMAINS}")
     if p_tag is not None:
@@ -1108,23 +1481,127 @@ def insert_scope(doc, db):
     p_tag = xu.find_paragraph(doc, "{EXTERNAL HOSTS}")
     if p_tag is not None:
         ext_disc = af.get_db_info(db, 'report.fields.external_discovered', '{EXTERNAL DISCOVERED}')
+        try:
+            ext_disc_formatted = format(ext_disc, ",")
+        except:
+            ext_disc_formatted = '<not set: {EXTERNAL DISCOVERED}>'
         ext_scan = af.get_db_info(db, 'report.fields.external_scanned', '{EXTERNAL SCANNED}')
-        p_tag.text = f"{ext_disc} of {ext_scan} scanned hosts were discovered to be live during testing of the following in scope targets:"
+        try:
+            ext_scan_formatted = format(ext_scan, ",")
+        except:
+            ext_scan_formatted = '<not set: {EXTERNAL SCANNED}>'
+        p_tag.text = f"{ext_disc_formatted} of {ext_scan_formatted} scanned hosts were discovered to be live during testing of the following in scope targets:"
 
     p_tag = xu.find_paragraph(doc, "{EXTERNAL SCOPE}")
     if p_tag is not None:
-        p_tag.text = af.get_db_info(db, 'engagementmeta.fields.ext_scope', '{EXTERNAL SCOPE}')
+        # Fetch the external scope data from the database
+        scope_data = af.get_db_info(db, 'engagementmeta.fields.ext_scope', '{EXTERNAL SCOPE}')
+        
+        # Split the scope data into individual lines
+        scope_lines = scope_data.strip().split('\n')
+        
+        # Determine the number of columns based on the number of subnets
+        if len(scope_lines) > 10:
+            columns = 4  # Set to 4 columns if more than 10 subnets
+            # Calculate the number of rows needed
+            rows = math.ceil(len(scope_lines) / columns)
+            
+            # Insert a table with the calculated rows and columns
+            table = doc.add_table(rows=rows, cols=columns)
+            table.style = doc.styles['Acronyms']
+            
+            # Populate the table with the subnets
+            for i, line in enumerate(scope_lines):
+                row = i // columns
+                col = i % columns
+                cell = table.cell(row, col)
+                cell.text = line.strip()
+
+                # Apply shading to every alternate row by setting it to the whole row
+                if row % 2 == 1:
+                    for cell in table.rows[row].cells:  # Use table.rows[row] to access the specific row
+                        shading_elm = parse_xml(r'<w:shd {} w:fill="D9D9D9"/>'.format(nsdecls('w')))
+                        cell._element.get_or_add_tcPr().append(shading_elm)
+            
+            # Find the correct paragraph index using a comparison
+            p_index = None
+            for index, paragraph in enumerate(doc.paragraphs):
+                if paragraph.text == p_tag.text:
+                    p_index = index
+                    break
+            
+            # Move the table to the correct position (after the placeholder)
+            if p_index is not None:
+                doc.paragraphs[p_index]._element.addnext(table._element)
+                # Remove the placeholder paragraph
+                p_tag.clear()
+            else:
+                raise ValueError("Placeholder paragraph not found in the document.")
+        else:
+            p_tag.text = af.get_db_info(db, 'engagementmeta.fields.ext_scope', '{EXTERNAL SCOPE}')
 
     p_tag = xu.find_paragraph(doc, "{INTERNAL HOSTS}")
     if p_tag is not None:
         int_disc = af.get_db_info(db, 'report.fields.internal_discovered', '{INTERNAL DISCOVERED}')
+        try:
+            int_disc_formatted = format(int_disc, ",")
+        except:
+            int_disc_formatted = '<not set: {INTERNAL DISCOVERED}>'
         int_scan = af.get_db_info(db, 'report.fields.internal_scanned', '{INTERNAL SCANNED}')
-        p_tag.text = f"{int_disc} of {int_scan} scanned hosts were discovered to be live during testing of the following in scope targets:"
+        try:
+            int_scan_formatted = format(int_scan, ",")
+        except:
+            int_scan_formatted = '<not set: {INTERNAL SCANNED}>'
+        p_tag.text = f"{int_disc_formatted} of {int_scan_formatted} scanned hosts were discovered to be live during testing of the following in scope targets:"
 
     p_tag = xu.find_paragraph(doc, "{INTERNAL SCOPE}")
     if p_tag is not None:
-        p_tag.text =af.get_db_info(db, 'engagementmeta.fields.int_scope', '{INTERNAL SCOPE}')
+        # Fetch the external scope data from the database
+        scope_data = af.get_db_info(db, 'engagementmeta.fields.int_scope', '{INTERNAL SCOPE}')
+        
+        # Split the scope data into individual lines
+        scope_lines = scope_data.strip().split('\n')
+        
+        # Determine the number of columns based on the number of subnets
+        if len(scope_lines) > 10:
+            columns = 4  # Set to 4 columns if more than 10 subnets
+            # Calculate the number of rows needed
+            rows = math.ceil(len(scope_lines) / columns)
+            
+            # Insert a table with the calculated rows and columns
+            table = doc.add_table(rows=rows, cols=columns)
+            table.style = doc.styles['Acronyms']
+            
+            # Populate the table with the subnets
+            for i, line in enumerate(scope_lines):
+                row = i // columns
+                col = i % columns
+                cell = table.cell(row, col)
+                cell.text = line.strip()
 
+                # Apply shading to every alternate row by setting it to the whole row
+                if row % 2 == 1:
+                    for cell in table.rows[row].cells:  # Use table.rows[row] to access the specific row
+                        shading_elm = parse_xml(r'<w:shd {} w:fill="D9D9D9"/>'.format(nsdecls('w')))
+                        cell._element.get_or_add_tcPr().append(shading_elm)
+            
+            # Find the correct paragraph index using a comparison
+            p_index = None
+            for index, paragraph in enumerate(doc.paragraphs):
+                if paragraph.text == p_tag.text:
+                    p_index = index
+                    break
+            
+            # Move the table to the correct position (after the placeholder)
+            if p_index is not None:
+                doc.paragraphs[p_index]._element.addnext(table._element)
+                # Remove the placeholder paragraph
+                p_tag.clear()
+            else:
+                raise ValueError("Placeholder paragraph not found in the document.")
+        else:
+            p_tag.text = af.get_db_info(db, 'engagementmeta.fields.int_scope', '{INTERNAL SCOPE}')
+        
     p_tag = xu.find_paragraph(doc, "{OSINF DOMAINS}")
     if p_tag is not None:
         p_tag.text =af.get_db_info(db, 'engagementmeta.fields.osinf_scope', '{OSINF DOMAINS}')
@@ -1157,7 +1634,7 @@ def insert_ransomware(doc, db):
         p_tag._p.addnext(page_break._p)
 
         respond = doc.add_paragraph()
-        r_run1 = respond.add_run("In the event that a ransomware attack has taken place, the incident should be reported to federal law enforcement (see ")
+        r_run1 = respond.add_run("If a ransomware attack has taken place, the incident should be reported to federal law enforcement (see ")
         xu.add_link(respond, 1, rr_url, "CISA's ransomware report page")
         r_run3 = respond.add_run(") and it is recommended to follow the steps outlined in the ")
         r_run4 = respond.add_run("Ransomware Response Checklist")
@@ -1166,6 +1643,7 @@ def insert_ransomware(doc, db):
         r_end = respond.add_run(".")
         respond.runs[3].font.bold = True
         respond.style = "Normal"
+        respond.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
         p_tag._p.addnext(respond._p)
 
         prevent = doc.add_paragraph()
@@ -1179,6 +1657,7 @@ def insert_ransomware(doc, db):
         prevent.runs[1].font.bold = True
         prevent.runs[3].font.bold = True
         prevent.style = "Normal"
+        prevent.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
         p_tag._p.addnext(prevent._p)
 
         if af.get_db_info(db, 'ransomware', 'NA') is not None:
@@ -1299,11 +1778,13 @@ def insert_ransomware(doc, db):
                 b = doc.add_paragraph()
                 b.text = r
                 b.style = "List Bullet 2"
+                b.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
                 p_tag._p.addnext(b._p)
 
             if len(ransomware_results) > 0:
                 customer_name = af.get_db_info(db, 'engagementmeta.fields.customer_long_name', '{STAKEHOLDER NAME}')
                 results = doc.add_paragraph(f"Additionally, in coordination with the {customer_name} point-of-contact, the team identified the following detection and response results:", style="Normal")
+                results.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
                 p_tag._p.addnext(results._p)
 
         if af.get_db_info(db, 'ransomwarescenarios', 'NA') is not None:
@@ -1314,11 +1795,16 @@ def insert_ransomware(doc, db):
             if af.get_db_info(db, 'ransomwarescenarios.fields.total', 'NA') != '<not set: NA>':
                 total = int(af.get_db_info(db, 'ransomwarescenarios.fields.total', 'NA'))
 
+            vuln_formatted = format(vuln, ",")
+            total_formatted = format(total, ",")
+
             customer_name = af.get_db_info(db, 'engagementmeta.fields.customer_long_name', '{STAKEHOLDER NAME}')
-            sim = doc.add_paragraph(f"During ransomware simulation, the CISA team found that endpoints in the {customer_name} network are vulnerable to {vuln} out of the {total} ransomware scenarios tested. Details of the ransomware simulation can be found in the corresponding report provided with the scan reports and raw data.", style="Normal")
+            sim = doc.add_paragraph(f"During ransomware simulation, the CISA team found that endpoints in the {customer_name} network are vulnerable to {vuln_formatted} out of the {total_formatted} ransomware scenarios tested. Details of the ransomware simulation can be found in the corresponding report provided with the scan reports and raw data.", style="Normal")
+            sim.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
             p_tag._p.addnext(sim._p)
 
-        para = doc.add_paragraph("Ransomware is malicious software that encrypts files on infected hosts. In order to decrypt affected files, users or organizations are instructed to pay a ransom. Infection occurs via manual or automated deployment after an attacker has compromised a host. The impact of mass infection can be severe including lost revenue, lost data, diminished reputation, and various costs associated with incident response and recovery.", style="Normal")
+        para = doc.add_paragraph("Ransomware is malicious software that encrypts files on infected hosts. To decrypt affected files, users or organizations are instructed to pay a ransom. Infection occurs via manual or automated deployment after an attacker has compromised a host. The impact of mass infection can be severe including lost revenue, lost data, diminished reputation, and various costs associated with incident response and recovery.", style="Normal")
+        para.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
         p_tag._p.addnext(para._p)
 
         header = doc.add_paragraph("Ransomware Susceptibility", style="Heading 2")
@@ -1352,6 +1838,7 @@ def insert_de_table(doc, db):
         r_run3 = rec.add_run(" section pertaining to protecting sensitive data, the CISA team recommends designing and implementing network perimeter controls to detect and prevent data exfiltration. Where possible, outbound traffic should be forced through authenticated proxy servers on the enterprise perimeter. These proxy servers can be configured to decrypt and inspect network traffic, flagging suspicious or anomalous characteristics. Additionally, perimeter controls should be configured with rules that allow or block traffic based on its destination.")
         rec.runs[1].font.bold = True
         rec.style = "Normal"
+        rec.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
         p_tag._p.addnext(rec._p)
 
         caption = xu.insert_caption(doc, False, "Data Exfiltration Results")
@@ -1436,9 +1923,11 @@ def insert_de_table(doc, db):
         xu.move_table_after(de_table, p_tag)
 
         space = doc.add_paragraph("", style="Normal")
+        space.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
         p_tag._p.addnext(space._p)
 
         intro = doc.add_paragraph("The loss of sensitive business data often represents one of the highest risks to an enterprise. The CISA team conducted a data exfiltration simulation, in which fabricated data formatted to look like Personally Identifiable Information (PII) was transferred from an internal network to a CISA-controlled server outside of the network. The following results were observed when the CISA team attempted to exfiltrate data over common protocols:", style="Normal")
+        intro.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
         p_tag._p.addnext(intro._p)
 
         header = doc.add_paragraph("Data Exfiltration", style="Heading 2")
@@ -1540,15 +2029,18 @@ def insert_pt_table(doc, db):
         p_tag._p.addnext(space._p)
 
         third = doc.add_paragraph("For the purpose of this testing, border protection refers to the ability to make an outbound connection from the internal network to the CISA-controlled C2 server. If this connection can be made over a particular protocol, it is assumed that all payloads utilizing the same protocol would not be blocked at the border.", style="Normal")
+        third.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
         p_tag._p.addnext(third._p)
 
         second = doc.add_paragraph("While it is good to have strong filters and configurations in place to protect users from phishing attacks, it is important to note that a determined adversary could likely circumvent mail and browser filters if an established, trusted domain is used. For this reason, all recommendations outlined in this report are important considerations for defense-in-depth.", style="Normal")
+        second.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
         p_tag._p.addnext(second._p)
 
         customer_name = af.get_db_info(db, 'engagementmeta.fields.customer_long_name', '{STAKEHOLDER NAME}')
         exception = af.get_db_info(db, 'report.fields.exception', '{MANUAL EXCEPTION}')
         browser = af.get_db_info(db, 'report.fields.browser', '{INTERNET BROWSER}')
         intro = doc.add_paragraph(f"During payload testing with {customer_name}, a manual exception {exception} necessary for the test email to reach the target inbox. {browser} was used to download the payloads and was deemed a primary browser used by {customer_name} users.", style="Normal")
+        intro.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
         p_tag._p.addnext(intro._p)
 
         header = doc.add_paragraph("Payload Testing Results", style="Heading 2")
@@ -1593,7 +2085,7 @@ def insert_pc_table(doc, db):
             if int(ele['length_of_campaign']) == 1:
                 length = str(ele['length_of_campaign']) + " Day"
             else:
-                length = str(ele['length_of_campaign']) + " Days"
+                length = format(ele['length_of_campaign'], ",") + " Days"
 
             end_space = doc.add_paragraph("", style="Normal")
             p_tag._p.addnext(end_space._p)
@@ -1610,12 +2102,12 @@ def insert_pc_table(doc, db):
             row1 = pc_table.add_row()
 
             pc_table.cell(1, 0).text = "Emails Sent"
-            pc_table.cell(1, 1).text = str(ele['emails_sent'])
+            pc_table.cell(1, 1).text = format(ele['emails_sent'], ",")
 
             row2 = pc_table.add_row()
 
             pc_table.cell(2, 0).text = "Emails Successfully Delivered"
-            pc_table.cell(2, 1).text = str(ele['emails_delivered'])
+            pc_table.cell(2, 1).text = format(ele['emails_delivered'], ",")
 
             row3 = pc_table.add_row()
 
@@ -1625,12 +2117,12 @@ def insert_pc_table(doc, db):
             row4 = pc_table.add_row()
 
             pc_table.cell(4, 0).text = "Total Clicks"
-            pc_table.cell(4, 1).text = str(ele['total_clicks'])
+            pc_table.cell(4, 1).text = format(ele['total_clicks'], ",")
 
             row5 = pc_table.add_row()
 
             pc_table.cell(5, 0).text = "Unique Clicks"
-            pc_table.cell(5, 1).text = str(ele['unique_clicks'])
+            pc_table.cell(5, 1).text = format(ele['unique_clicks'], ",")
 
             row6 = pc_table.add_row()
 
@@ -1643,7 +2135,7 @@ def insert_pc_table(doc, db):
             if str(ele['creds_harvested']) == "None":
                 pc_table.cell(7, 1).text = "N/A"
             else:
-                pc_table.cell(7, 1).text = str(ele['creds_harvested'])
+                pc_table.cell(7, 1).text = format(ele['creds_harvested'], ",")
 
             row8 = pc_table.add_row()
 
@@ -1651,7 +2143,7 @@ def insert_pc_table(doc, db):
             if str(ele['number_exploited']) == "None":
                 pc_table.cell(8, 1).text = "N/A"
             else:
-                pc_table.cell(8, 1).text = str(ele['number_exploited'])
+                pc_table.cell(8, 1).text = format(ele['number_exploited'], ",")
 
             row9 = pc_table.add_row()
 
@@ -1671,6 +2163,7 @@ def insert_pc_table(doc, db):
 
             description = xu.xsafe(ele['campaign_description'])
             campaign_description = doc.add_paragraph(description, style="Normal")
+            campaign_description.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
             p_tag._p.addnext(campaign_description._p)
 
         header = doc.add_paragraph("Phishing Campaign Results", style="Heading 2")
@@ -1737,11 +2230,13 @@ def insert_osinf_tables(doc, db):
             emails_identified = int(af.get_db_info(db, 'breachmetrics.fields.emails_identified', 'NA'))
         else:
             emails_identified = 0
+        emails_identified_formatted = format(emails_identified, ",")
 
         if af.get_db_info(db, 'breachmetrics.fields.emails_identified_tp', 'NA') != '<not set: NA>':
             emails_identified_tp = int(af.get_db_info(db, 'breachmetrics.fields.emails_identified_tp', 'NA'))
         else:
             emails_identified_tp = 0
+        emails_identified_tp_formatted = format(emails_identified_tp, ",")
 
         if af.get_db_info(db, 'breachmetrics.fields.percentage_emails', 'NA') != '<not set: NA>':
             percentage_emails = round(float(af.get_db_info(db, 'breachmetrics.fields.percentage_emails', 'NA')) * 100, 2)
@@ -1754,16 +2249,19 @@ def insert_osinf_tables(doc, db):
             creds_identified = int(af.get_db_info(db, 'breachmetrics.fields.creds_identified', 'NA'))
         else:
             creds_identified = 0
+        creds_identified_formatted = format(creds_identified, ",")
 
         if af.get_db_info(db, 'breachmetrics.fields.creds_identified_unique', 'NA') != '<not set: NA>':
             creds_identified_unique = int(af.get_db_info(db, 'breachmetrics.fields.creds_identified_unique', 'NA'))
         else:
             creds_identified_unique = 0
+        creds_identified_unique_formatted = format(creds_identified_unique, ",")
 
         if af.get_db_info(db, 'breachmetrics.fields.creds_validated', 'NA') != '<not set: NA>':
             creds_validated = int(af.get_db_info(db, 'breachmetrics.fields.creds_validated', 'NA'))
         else:
             creds_validated = 0
+        creds_validated_formatted = format(creds_validated, ",")
 
         end_space = doc.add_paragraph("", style="Normal")
         p_tag._p.addnext(end_space._p)
@@ -1780,17 +2278,17 @@ def insert_osinf_tables(doc, db):
         row1 = bm_creds_table.add_row()
 
         bm_creds_table.cell(1, 0).text = "Credentials Identified"
-        bm_creds_table.cell(1, 1).text = str(creds_identified)
+        bm_creds_table.cell(1, 1).text = creds_identified_formatted
 
         row2 = bm_creds_table.add_row()
 
         bm_creds_table.cell(2, 0).text = "Unique Users With Identified Credentials"
-        bm_creds_table.cell(2, 1).text = str(creds_identified_unique)
+        bm_creds_table.cell(2, 1).text = creds_identified_unique_formatted
 
         row3 = bm_creds_table.add_row()
 
         bm_creds_table.cell(3, 0).text = "Credentials Successfully Validated"
-        bm_creds_table.cell(3, 1).text = str(creds_validated)
+        bm_creds_table.cell(3, 1).text = creds_validated_formatted
 
         bm_creds_table.cell(0, 0).paragraphs[0].runs[0].font.color.rgb = RGBColor(255, 255, 255)
         bm_creds_table.cell(0, 0).paragraphs[0].runs[0].font.bold = True
@@ -1815,12 +2313,12 @@ def insert_osinf_tables(doc, db):
         row4 = bm_email_table.add_row()
 
         bm_email_table.cell(1, 0).text = "Emails Identified"
-        bm_email_table.cell(1, 1).text = str(emails_identified)
+        bm_email_table.cell(1, 1).text = emails_identified_formatted
 
         row5 = bm_email_table.add_row()
 
         bm_email_table.cell(2, 0).text = "Emails Identified in Third-Party Data Breaches"
-        bm_email_table.cell(2, 1).text = str(emails_identified_tp)
+        bm_email_table.cell(2, 1).text = emails_identified_tp_formatted
 
         row6 = bm_email_table.add_row()
 
@@ -1887,12 +2385,15 @@ def insert_osinf_tables(doc, db):
         #creds_validated = af.get_db_info(db, 'breachmetrics.fields.creds_validated', '{CREDENTIALS VALIDATED}')
 
         third = doc.add_paragraph(f"Whenever credentials are discovered as a part of data breaches, CISA attempts to validate whether the credentials are still active and could be used as part of successful network exploitation. CISA was able to identify {words['creds_identified_unique']} unique {plural['creds_identified_unique']} with credentials found in publicly accessible breaches. Through testing, {words['creds_validated']} {plural['creds_validated']} of credentials {plural['creds']} successfully validated. Valid credentials can be used by threat actors to access {customer_name} resources.", style="Normal")
+        third.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
         p_tag._p.addnext(third._p)
 
         second = doc.add_paragraph(f"Once user email addresses have been identified, additional research is performed to determine if any have been exposed in publicly accessible breach information. CISA was able to identify that {words['emails_identified_tp']} of the discovered email addresses had been involved in breaches with publicly accessible data available. This indicates that {percentage} of identified users ({counts['emails_identified_tp']} of {counts['emails_identified']}) have been involved in previous data breaches.", style="Normal")
+        second.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
         p_tag._p.addnext(second._p)
         
         first = doc.add_paragraph(f"During the engagement, the CISA team performed reconnaissance of open-source information pertaining to the {customer_name} domain(s). With about one hour’s worth of effort, a threat actor would be able to identify {words['emails_identified']} unique user email {plural['emails_identified']} related to the {customer_name} domain. {plural['emails']} email {plural['emails_identified']} could be used in targeted social engineering attacks, such as phishing, or could be used to attempt brute force or password guessing attacks against authentication portals.", style="Normal")
+        first.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
         p_tag._p.addnext(first._p)
 
         header = doc.add_paragraph("Open-Source Information Gathering", style="Heading 2")
@@ -1901,18 +2402,28 @@ def insert_osinf_tables(doc, db):
     xu.delete_paragraph(p_tag)
 
 
-def insert_pm_table(doc, db):
+def insert_pm_table(doc, db, count):
+
     """Function that fills out the port mapping appendix of the report.
 
     Args:
         doc (docx object): The docx template.
         db (List of dictionaries): The JSON of the engagment data.
+        count (integer): Used to determine the Appendix letter
     """
 
-    p_tag = xu.find_paragraph(doc, "{Table: Port Mapping}")
+    p_tag = xu.find_paragraph(doc, "{PORT MAPPING}")
 
     if p_tag is None:
         return
+
+    page_break = doc.add_paragraph()
+    page_break.add_run().add_break(WD_BREAK.PAGE)
+    p_tag._p.addnext(page_break._p)
+
+    pm_tcap = xu.xsafe("Open Ports and Services on External Systems")
+    pm_caption = xu.insert_caption(doc, False, pm_tcap)
+    p_tag._p.addnext(pm_caption._p)
 
     pm_table = doc.add_table(1, 4)
     pm_table.style = doc.styles['CISA Table']
@@ -1953,25 +2464,34 @@ def insert_pm_table(doc, db):
 
     xu.move_table_after(pm_table, p_tag)
 
+    space = doc.add_paragraph("", style="Normal")
+    p_tag._p.addnext(space._p)
+
+    stakeholder_name = af.get_db_info(db, 'engagementmeta.fields.customer_long_name', '{STAKEHOLDER NAME}')
+    para = doc.add_paragraph(f"During external testing, the CISA team identified the following open ports/services on {stakeholder_name}’s public-facing systems. It is recommended to review the data below, determine if any unnecessary ports/services are publicly accessible, and minimize the external attack surface where possible.", style="Normal")
+    para.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+    p_tag._p.addnext(para._p)
+
+    letter = chr(ord('A') + count)
+    header = doc.add_paragraph("Appendix " + letter + ": External Port Mapping", style="Heading 1")
+    p_tag._p.addnext(header._p)
+
     xu.delete_paragraph(p_tag)
 
 
-def insert_scope_table(doc, db):
+def insert_scope_table(doc, db, count):
     """Function that fills out the scope appendix of the report for FAST.
 
     Args:
         doc (docx object): The docx template.
         db (List of dictionaries): The JSON of the engagment data.
+        count (integer): Used to determine the Appendix letter
     """
 
-    p_tag = xu.find_paragraph(doc, "{Table: Scope}")
+    p_tag = xu.find_paragraph(doc, "{SCOPE TABLE}")
 
     if p_tag is None:
         return
-
-    page_break = doc.add_paragraph()
-    page_break.add_run().add_break(WD_BREAK.PAGE)
-    p_tag._p.addnext(page_break._p)
 
     exc_table = doc.add_table(1, 2)
     exc_table.style = doc.styles['CISA Table']
@@ -1995,9 +2515,6 @@ def insert_scope_table(doc, db):
     xu.set_column_width(exc_table.columns[1], 5)
 
     xu.move_table_after(exc_table, p_tag)
-
-    para_break = doc.add_paragraph()
-    p_tag._p.addnext(para_break._p)
 
     header = doc.add_paragraph("Exclusions", style="Heading 2")
     p_tag._p.addnext(header._p)
@@ -2044,8 +2561,9 @@ def insert_scope_table(doc, db):
 
     xu.move_table_after(scope_table, p_tag)
 
-    para_break = doc.add_paragraph()
-    p_tag._p.addnext(para_break._p)
+    letter = chr(ord('A') + count)
+    header = doc.add_paragraph("Appendix " + letter + ": Scope", style="Heading 1")
+    p_tag._p.addnext(header._p)
 
     xu.delete_paragraph(p_tag)
 
@@ -2060,6 +2578,7 @@ def generate_ptp_report(template, output, draft, json, media):
         json (string): Path to the json file with the assessment data.
         media (string): Path to the media folder that contains the assessment screenshots.
     """
+    
     if not os.path.exists(json):
         print("Invalid json file: ", json)
         sys.exit(1)
@@ -2080,47 +2599,51 @@ def generate_ptp_report(template, output, draft, json, media):
 
     # ---- open the report template
     doc = docx.Document(template)
+    
 
     # ---- replace paragraph tags
     for para in doc.paragraphs:
         for key in af.tag_db_map.keys():
             if key in para.text:
                 inline = para.runs
+                ext_start_date = af.get_db_info(asmt_info, 'engagementmeta.fields.ext_start_date', '{EXT START DATE}')
+                ext_end_date = af.get_db_info(asmt_info, 'engagementmeta.fields.ext_end_date', '{EXT END DATE}')
+                int_start_date = af.get_db_info(asmt_info, 'engagementmeta.fields.int_start_date', '{INT START DATE}')
+                int_end_date = af.get_db_info(asmt_info, 'engagementmeta.fields.int_end_date', '{INT END DATE}')
                 # Loop added to work with runs (strings with same style)
                 for i in range(len(inline)):
                     if key in inline[i].text:
-                        if key == "{External Start Date}":
+                        if key == "{External Dates}":
+                            en_dash = "\u2013"
                             try:
-                                ext_start_date = af.get_db_info(asmt_info, 'engagementmeta.fields.ext_start_date', '{EXT START DATE}')
-                                replace_str = datetime.datetime.strptime(ext_start_date, '%Y-%m-%d').strftime('%B %-d, %Y')
+                                if datetime.datetime.strptime(ext_start_date, '%Y-%m-%d').strftime('%B') == datetime.datetime.strptime(ext_end_date, '%Y-%m-%d').strftime('%B'):
+                                    ext_start = datetime.datetime.strptime(ext_start_date, '%Y-%m-%d').strftime('%B %-d')
+                                    ext_end = datetime.datetime.strptime(ext_end_date, '%Y-%m-%d').strftime('%-d, %Y')
+                                else:
+                                    ext_start = datetime.datetime.strptime(ext_start_date, '%Y-%m-%d').strftime('%B %-d, %Y ')
+                                    ext_end = datetime.datetime.strptime(ext_end_date, '%Y-%m-%d').strftime(' %B %-d, %Y')
+                                ext_date_range = str(ext_start) + en_dash + str(ext_end)
+                                inline[i].text = inline[i].text.replace(key, ext_date_range)
                             except:
-                                replace_str = "<NO DATE SET>"
-                        elif key == "{External End Date}":
+                                inline[i].text = inline[i].text.replace(key, "<NO DATE SET>")
+                        elif key == "{Internal Dates}":
                             try:
-                                ext_end_date = af.get_db_info(asmt_info, 'engagementmeta.fields.ext_end_date', '{EXT END DATE}')
-                                replace_str = datetime.datetime.strptime(ext_end_date, '%Y-%m-%d').strftime('%B %-d, %Y')
+                                if datetime.datetime.strptime(int_start_date, '%Y-%m-%d').strftime('%B') == datetime.datetime.strptime(int_end_date, '%Y-%m-%d').strftime('%B'):
+                                    int_start = datetime.datetime.strptime(int_start_date, '%Y-%m-%d').strftime('%B %-d')
+                                    int_end = datetime.datetime.strptime(int_end_date, '%Y-%m-%d').strftime('%-d, %Y')
+                                else:
+                                    int_start = datetime.datetime.strptime(int_start_date, '%Y-%m-%d').strftime('%B %-d, %Y ')
+                                    int_end = datetime.datetime.strptime(int_end_date, '%Y-%m-%d').strftime(' %B %-d, %Y')
+                                int_date_range = str(int_start) + en_dash + str(int_end)
+                                inline[i].text = inline[i].text.replace(key, int_date_range)
                             except:
-                                replace_str = "<NO DATE SET>"
-                        elif key == "{Internal Start Date}":
-                            try:
-                                int_start_date = af.get_db_info(asmt_info, 'engagementmeta.fields.int_start_date', '{INT START DATE}')
-                                replace_str = datetime.datetime.strptime(int_start_date, '%Y-%m-%d').strftime('%B %-d, %Y')
-                            except:
-                                replace_str = "<NO DATE SET>"
-                        elif key == "{Internal End Date}":
-                            try:
-                                int_end_date = af.get_db_info(asmt_info, 'engagementmeta.fields.int_end_date', '{INT END DATE}')
-                                replace_str = datetime.datetime.strptime(int_end_date, '%Y-%m-%d').strftime('%B %-d, %Y')
-                            except:
-                                replace_str = "<NO DATE SET>"
-                        else:    
+                                inline[i].text = inline[i].text.replace(key, "<NO DATE SET>")
+                        else:
                             replace_str = af.get_db_info(asmt_info, af.tag_db_map[key], key)
-
-                        if isinstance(replace_str, list):
-                            replace_str = ', '.join(replace_str)
-
-                        text = inline[i].text.replace(key, str(replace_str))
-                        inline[i].text = text
+                            if isinstance(replace_str, list):
+                                replace_str = ', '.join(replace_str)
+                            text = inline[i].text.replace(key, str(replace_str))
+                            inline[i].text = text
 
     for tbl in doc.tables:
         for row in tbl.rows:
@@ -2152,7 +2675,10 @@ def generate_ptp_report(template, output, draft, json, media):
 
     # ---- add findings and kevs
     insert_fs_table(doc, asmt_info, "{Table: Findings Summary}")
+    insert_fs_table(doc, asmt_info, "{Table: Unmitigated Findings Summary}", mitigated=False)
     insert_df_table(doc, asmt_info, "{Table: Detailed Findings}", media)
+    insert_df_table(doc, asmt_info, "{Table: Unmitigated Detailed Findings}", media, mitigated=False)
+
     #insert_kev_table(doc, asmt_info, "{Table: KEVs}")
 
     # ---- add additional service sections
@@ -2163,103 +2689,173 @@ def generate_ptp_report(template, output, draft, json, media):
         insert_pc_table(doc, asmt_info)
     if report_type == "RPT":
         insert_pt_table(doc, asmt_info)
+        insert_pc_table(doc, asmt_info)
         insert_osinf_tables(doc, asmt_info)
     if report_type == "FAST":
         insert_pc_table(doc, asmt_info)
 
     # ---- add attack paths
-    insert_attack_paths(doc, asmt_info, media)
+    if sum(1 for item in af.model_gen(asmt_info, "ptportal.narrative")) > 0:
+        insert_attack_paths(doc, asmt_info, media)
+    else:
+        p_tag = xu.find_paragraph(doc, "{ATTACK PATHS}")
+        if p_tag is None:
+            return
+        xu.delete_paragraph(p_tag)
 
     # ---- add appendices
-    insert_pm_table(doc, asmt_info)
-    insert_narrative(doc, asmt_info, media)
-    if report_type == "FAST":
-        insert_scope_table(doc, asmt_info)
-    if report_type == "RVA":
-        insert_pass_analysis(doc, asmt_info)
-    insert_acronyms(doc, asmt_info)
+    appendix_count = 1
+    pass_analysis = af.get_db_info(asmt_info, 'report.fields.password_analysis', 'None')
 
-    tlp = af.get_db_info(asmt_info, 'engagementmeta.fields.traffic_light_protocol', '{TRAFFIC LIGHT PROTOCOL}')
-
-    first_header = doc.sections[0].first_page_header
-    first_footer = doc.sections[0].first_page_footer
-
-    if tlp == "Red":
-        label = " TLP:RED"
-        color = RGBColor(255, 43, 43)
-    elif tlp == "Amber":
-        label = " TLP:AMBER"
-        color = RGBColor(255, 192, 0)
-    elif tlp == "Amber+Strict":
-        label = " TLP:AMBER+STRICT"
-        color = RGBColor(255, 192, 0)
-    elif tlp == "Clear":
-        label = " TLP:CLEAR"
-        color = RGBColor(255, 255, 255)
+    if report_type == "FAST" and sum(1 for item in af.model_gen(asmt_info, "ptportal.narrative")) > 0:
+        insert_narrative(doc, asmt_info, media, appendix_count)
+        appendix_count+=1
+    elif report_type == "FAST":
+        p_tag = xu.find_paragraph(doc, "{NARRATIVE SECTION}")
+        if p_tag is not None:
+            xu.delete_paragraph(p_tag)
     else:
-        label = None
+        print("Skipping FAST narrative section...")
 
-    if label is not None:
-        for fheaderp in first_header.paragraphs:
-            if "TLP" in fheaderp.text:
-                p = fheaderp._p
-            for run in fheaderp.runs:
-                if "TLP" in run.text:
-                    p.remove(run._r)
-                    tlp_label = fheaderp.add_run(label)
-                    tlp_label.font.color.rgb = color
-                    tlp_label.font.name = "Franklin Gothic Medium"
-                    tlp_label.font.size = docx.shared.Pt(14)
-                    tlp_label.font.highlight_color = WD_COLOR_INDEX.BLACK
-                    tlp_end = fheaderp.add_run(".")
-                    tlp_end.font.color.rgb = RGBColor(0, 0, 0)
-                    tlp_end.font.highlight_color = WD_COLOR_INDEX.BLACK
+    if report_type == "FAST":
+        insert_scope_table(doc, asmt_info, appendix_count)
+        appendix_count+=1
 
-        for ffooterp in first_footer.paragraphs:
-            if "TLP" in ffooterp.text:
-                p = ffooterp._p
-            for run in ffooterp.runs:
-                if "TLP" in run.text:
-                    p.remove(run._r)
-                    tlp_label = ffooterp.add_run(label)
-                    tlp_label.font.color.rgb = color
-                    tlp_label.font.name = "Franklin Gothic Medium"
-                    tlp_label.font.size = docx.shared.Pt(14)
-                    tlp_label.font.highlight_color = WD_COLOR_INDEX.BLACK
-                    tlp_end = ffooterp.add_run(".")
-                    tlp_end.font.color.rgb = RGBColor(0, 0, 0)
-                    tlp_end.font.highlight_color = WD_COLOR_INDEX.BLACK
+    if report_type != "FAST" and sum(1 for item in af.model_gen(asmt_info, "ptportal.portmappinghost")) > 0:
+        insert_pm_table(doc, asmt_info, appendix_count)
+        appendix_count+=1
+    elif report_type != "FAST":
+        p_tag = xu.find_paragraph(doc, "{PORT MAPPING}")
+        if p_tag is not None:
+            xu.delete_paragraph(p_tag)
+    else:
+        print("Skipping port mapping section...")
 
-        for section in doc.sections:
-            header = section.header
-            footer = section.footer
-            for headerp in header.paragraphs:
-                if "TLP" in headerp.text:
-                    p = headerp._p
-                    headerp.style = "TLP"
-                    for run in headerp.runs:
+    if report_type != "FAST" and sum(1 for item in af.model_gen(asmt_info, "ptportal.narrative")) > 0:
+        insert_narrative(doc, asmt_info, media, appendix_count)
+        appendix_count+=1
+    elif report_type != "FAST":
+        p_tag = xu.find_paragraph(doc, "{NARRATIVE SECTION}")
+        if p_tag is not None:
+            xu.delete_paragraph(p_tag)
+    else:
+        print("Skipping narrative section...")
+
+    if report_type == "RVA" and pass_analysis != "<not set: None>":
+        insert_pass_analysis(doc, asmt_info, appendix_count)
+        appendix_count+=1
+    else:
+        p_tag = xu.find_paragraph(doc, "{PASSWORD ANALYSIS}")
+        if p_tag is not None:
+            xu.delete_paragraph(p_tag)
+
+    if report_type == "FAST":
+        # TODO: Create an appendix style to move appendix counting into word and out of python
+        insert_mitigated_df_table(doc, asmt_info, "{Table: Mitigated Findings Details}", appendix_count)
+        appendix_count += 1 # This fs_table is under an appendix in the FAST report
+
+    if report_type != "FAST":
+
+        insert_acronyms(doc, asmt_info, appendix_count)
+
+        tlp = af.get_db_info(asmt_info, 'engagementmeta.fields.traffic_light_protocol', '{TRAFFIC LIGHT PROTOCOL}')
+
+        first_header = doc.sections[0].first_page_header
+        first_footer = doc.sections[0].first_page_footer
+
+        if tlp == "Red":
+            label = " TLP:RED"
+            color = RGBColor(255, 43, 43)
+        elif tlp == "Amber":
+            label = " TLP:AMBER"
+            color = RGBColor(255, 192, 0)
+        elif tlp == "Amber+Strict":
+            label = " TLP:AMBER+STRICT"
+            color = RGBColor(255, 192, 0)
+        elif tlp == "Clear":
+            label = " TLP:CLEAR"
+            color = RGBColor(255, 255, 255)
+        else:
+            label = None
+
+        if label is not None:
+            for fheaderp in first_header.paragraphs:
+                if "TLP" in fheaderp.text:
+                    p = fheaderp._p
+                for run in fheaderp.runs:
+                    if "TLP" in run.text:
                         p.remove(run._r)
-                    tlp_label = headerp.add_run(label)
-                    tlp_label.font.color.rgb = color
-                    tlp_label.font.highlight_color = WD_COLOR_INDEX.BLACK
-                    tlp_end = headerp.add_run(".")
-                    tlp_end.font.color.rgb = RGBColor(0, 0, 0)
-                    tlp_end.font.highlight_color = WD_COLOR_INDEX.BLACK
+                        tlp_label = fheaderp.add_run(label)
+                        tlp_label.font.color.rgb = color
+                        tlp_label.font.name = "Franklin Gothic Medium"
+                        tlp_label.font.size = docx.shared.Pt(14)
+                        tlp_label.font.highlight_color = WD_COLOR_INDEX.BLACK
+                        tlp_end = fheaderp.add_run(".")
+                        tlp_end.font.color.rgb = RGBColor(0, 0, 0)
+                        tlp_end.font.highlight_color = WD_COLOR_INDEX.BLACK
 
-            for footerp in footer.paragraphs:
-                if "TLP" in footerp.text:
-                    p = footerp._p
-                    footerp.style = "TLP"
-                    for run in footerp.runs:
+            for ffooterp in first_footer.paragraphs:
+                if "TLP" in ffooterp.text:
+                    p = ffooterp._p
+                for run in ffooterp.runs:
+                    if "TLP" in run.text:
                         p.remove(run._r)
-                    tlp_label = footerp.add_run(label)
-                    tlp_label.font.color.rgb = color
-                    tlp_label.font.highlight_color = WD_COLOR_INDEX.BLACK
-                    tlp_end = footerp.add_run(".")
-                    tlp_end.font.color.rgb = RGBColor(0, 0, 0)
-                    tlp_end.font.highlight_color = WD_COLOR_INDEX.BLACK
+                        tlp_label = ffooterp.add_run(label)
+                        tlp_label.font.color.rgb = color
+                        tlp_label.font.name = "Franklin Gothic Medium"
+                        tlp_label.font.size = docx.shared.Pt(14)
+                        tlp_label.font.highlight_color = WD_COLOR_INDEX.BLACK
+                        tlp_end = ffooterp.add_run(".")
+                        tlp_end.font.color.rgb = RGBColor(0, 0, 0)
+                        tlp_end.font.highlight_color = WD_COLOR_INDEX.BLACK
 
-    # ---- save the report
+            for section in doc.sections:
+                header = section.header
+                footer = section.footer
+                for headerp in header.paragraphs:
+                    if "TLP" in headerp.text:
+                        p = headerp._p
+                        headerp.style = "TLP"
+                        for run in headerp.runs:
+                            p.remove(run._r)
+                        tlp_label = headerp.add_run(label)
+                        tlp_label.font.color.rgb = color
+                        tlp_label.font.highlight_color = WD_COLOR_INDEX.BLACK
+                        tlp_end = headerp.add_run(".")
+                        tlp_end.font.color.rgb = RGBColor(0, 0, 0)
+                        tlp_end.font.highlight_color = WD_COLOR_INDEX.BLACK
+
+                for footerp in footer.paragraphs:
+                    if "TLP" in footerp.text:
+                        p = footerp._p
+                        footerp.style = "TLP"
+                        for run in footerp.runs:
+                            p.remove(run._r)
+                        tlp_label = footerp.add_run(label)
+                        tlp_label.font.color.rgb = color
+                        tlp_label.font.highlight_color = WD_COLOR_INDEX.BLACK
+                        tlp_end = footerp.add_run(".")
+                        tlp_end.font.color.rgb = RGBColor(0, 0, 0)
+                        tlp_end.font.highlight_color = WD_COLOR_INDEX.BLACK
+    
+
+    # ---- Process paragraphs (preserving images, other elements)
+    for para in doc.paragraphs:
+        for run in para.runs:
+            # Apply the fix only on text-based runs
+            if run.text:
+                fix_double_spaces_in_run(run)
+
+    # ---- Process table cells (preserving structure)
+    for tbl in doc.tables:
+        for row in tbl.rows:
+            for cell in row.cells:
+                for para in cell.paragraphs:
+                    for run in para.runs:
+                        # Apply the fix only on text-based runs
+                        if run.text:
+                            fix_double_spaces_in_run(run)
+    # ---- Save the report
     doc.save(output)
 
 

@@ -86,18 +86,19 @@ DM22-1011
 {% block content %}
 <sds-link href="{% url 'finding_create' %}">
 	<div class="module-sm">
-		<h1>Findings</h1>
+		{% if total_findings == 0 %}<img class="w-8 h-8" src="/static/icons/triangle-exclamation-solid.svg" style="float:left; padding: 5px 5px 0px 0px">{% endif %}<h1>Findings</h1>
 		<div class="content-xl">{{total_findings}}</div>
 	</div>
 </sds-link>
 <sds-link href="{% url 'kev_catalog' %}">
 	<div class="module-sm">
-		<h1>KEVs</h1>
+		{% if total_kevs == 0 %}<img class="w-8 h-8" src="/static/icons/triangle-exclamation-solid.svg" style="float:left; padding: 5px 5px 0px 0px">{% endif %}<h1>KEVs</h1>
 		<div class="content-xl">{{total_kevs}}</div>
 	</div>
 </sds-link>
 <div class="module-sm">
-	<h1>Phishing</h1>
+	{% if report.report_type == 'RVA' %}
+	{% if total_payloads == 0 or not report.payload_testing_date or not report.exception or not report.browser or not used_solutions or missing_protocols or total_campaigns == 0 or missing_campaign_results or missing_campaign_descriptions or not report.phishing_campaign_date %}<img class="w-8 h-8" src="/static/icons/triangle-exclamation-solid.svg" style="float:left; padding: 5px 5px 0px 0px">{% endif %}<h1>Phishing</h1>
 	<br>
 	<sds-link href="{% url 'campaigns' %}">
 		<div style="float:left; width:50%;">
@@ -111,10 +112,26 @@ DM22-1011
 			<div class="content-sm">Payloads</div>
 		</div>
 	</sds-link>
+	{% elif report.report_type == 'FAST' %}
+	{% if total_campaigns == 0 or missing_campaign_results or missing_campaign_descriptions or not report.phishing_campaign_date %}<img class="w-8 h-8" src="/static/icons/triangle-exclamation-solid.svg" style="float:left; padding: 5px 5px 0px 0px">{% endif %}<h1>Phishing</h1>
+	<br>
+	<sds-link href="{% url 'campaigns' %}">
+		<div class="content-med">{{click_rate}}%</div>
+		<div class="content-sm">Click Rate</div>
+	</sds-link>
+	{% elif report.report_type == 'RPT' %}
+	{% if total_payloads == 0 or not report.payload_testing_date or not report.exception or not report.browser or not used_solutions or missing_protocols %}<img class="w-8 h-8" src="/static/icons/triangle-exclamation-solid.svg" style="float:left; padding: 5px 5px 0px 0px">{% endif %}<h1>Phishing</h1>
+	<br>
+	<sds-link href="{% url 'payloads' %}">
+		<div class="content-med">{{total_payloads}}</div>
+		<div class="content-sm">Payloads</div>
+	</sds-link>
+	{% endif %}
 </div>
 <sds-link href="{% url 'risk_score' %}">
 	<div class="module-sm">
-		<h1>Risk Score</h1>
+		{% if report.report_type == 'RVA' or report.report_type == 'RPT' %}
+		{% if missing_magnitude or missing_likelihood %}<img class="w-8 h-8" src="/static/icons/triangle-exclamation-solid.svg" style="float:left; padding: 5px 5px 0px 0px">{% endif %}{% endif %}<h1>Risk Score</h1>
 		<br>
 		<div style="float:left; width:50%;">
 			<div class="content-med">{{total_risk_score}}</div>
@@ -160,43 +177,11 @@ DM22-1011
 <br><br><br><br><br><br><br><br><br>
 <div class="module" style="width:99%; float:left;">
 
-		<!--<template #title style="float:left"><b style="font-size:18pt">FINDINGS ({{total_findings}})</b>
-			<div style="float:right">
-				<sds-button v-if="'{{engagement_present}}' == 'True'" variant="primary" @click="redirectLink('{% url "finding_create" %}')">Add Finding</sds-button>
-				<sds-button v-else variant="danger" @click="redirectLink('{% url "engagement_create" %}')">Add Assessment Details</sds-button>
-			</div>
-		</template>-->
-	<!--<div id="dashboardTrackers" class="grid md:grid-cols-3 gap-x-8 mt-4 h-48 mb-4">
-		<div class="block bg-white dark:bg-gray-800 dark:border-gray-700 border">
-			<header class='h-4/6 bg-red-500 border-b dark:border-gray-700'>
-				<h2 class="text-3xl pt-3 pl-3 absolute"><i class="fa fa-exclamation-circle"></i></h2>
-				<h2 class="text-right pt-3 pr-3 text-2xl align-top">{{ total_critical}} Critical</h2>
-			</header>
-			<div class="p-4 h-2/6">
-				<sds-link href="" variant="info" v-bind:cta="true">View Details</sds-link>
-			</div>
-		</div>
-		<div class="block bg-white dark:bg-gray-800 dark:border-gray-700 border">
-			<header class='h-4/6 bg-orange-500 border-b dark:border-gray-700'>
-				<h2 class="text-3xl pt-3 pl-3 absolute"><i class="fa fa-exclamation-triangle"></i></h2>
-				<h2 class="text-right pt-3 pr-3 text-2xl align-top">{{ total_high}} High</h2>
-			</header>
-			<div class="p-4 h-2/6">
-				<sds-link href="" variant="info" v-bind:cta="true">View Details</sds-link>
-			</div>
-		</div>
-		<div class="block bg-white dark:bg-gray-800 dark:border-gray-700 border">
-			<header class='h-4/6 bg-yellow-500 border-b dark:border-gray-700'>
-				<h2 class="text-3xl pt-3 pl-3 absolute"><i class="fa fa-exclamation"></i></h2>
-				<h2 class="text-right pt-3 pr-3 text-2xl align-top">{{ total_medium}} Medium</h2>
-			</header>
-			<div class="p-4 h-2/6">
-				<sds-link href="" variant="info" v-bind:cta="true">View Details</sds-link>
-			</div>
-		</div>
-	</div>-->
-
 		<sds-table :fields="fields" :items="items" class="table-prose" v-bind="dashboardTableArgs">
+			<template #cell(warning)="{item}">
+				<sds-button v-if="item.warning" v-model="item.warning" type="button" @click="redirectLink([[item.url]])"><img class="w-4 h-4" src="/static/icons/triangle-exclamation-solid.svg"></sds-button>
+				<sds-button v-else v-model="item.warning" type="button" @click="redirectLink([[item.url]])"></sds-button>
+			</template>
 			<template #cell(finding_name)="{item}">
 				<sds-button v-model="item.finding_name" type="button" @click="redirectLink([[item.url]])">[[item.finding_name]]</sds-button>
 			</template>
@@ -206,11 +191,20 @@ DM22-1011
 			<template #cell(severity)="{item}">
 				<sds-button v-model="item.severity" type="button" @click="redirectLink([[item.url]])">[[item.severity]]</sds-button>
 			</template>
-			<template #cell(created)="{item}">
-				<sds-button v-model="item.created" type="button" @click="redirectLink([[item.url]])">[[item.created]]</sds-button>
+			<template #cell(mitigated)="{item}">
+				<sds-button v-model="item.mitigated" type="button" @click="redirectLink([[item.url]])">[[item.mitigated]]%</sds-button>
 			</template>
+			<!--<template #cell(created)="{item}">
+				<sds-button v-model="item.created" type="button" @click="redirectLink([[item.url]])">[[item.created]]</sds-button>
+			</template>-->
 			<template #cell(updated)="{item}">
 				<sds-button v-model="item.updated" type="button" @click="redirectLink([[item.url]])">[[item.updated]]</sds-button>
+			</template>
+			<template #cell(created_by)="{item}">
+				<sds-button v-model="item.created_by" type="button" @click="redirectLink([[item.url]])">[[item.created_by]]</sds-button>
+			</template>
+			<template #cell(status)="{item}">
+				<div v-if="item.status == 'Complete'"><sds-badge variant="green">[[item.status]]</sds-badge></div><div v-else-if="item.status == 'Draft'"><sds-badge variant="orange">[[item.status]]</sds-badge></div><div v-else><sds-badge variant="red">[[item.status]]</sds-badge></div>
 			</template>
 		</sds-table>
 </div>
@@ -223,6 +217,11 @@ DM22-1011
 		pageData = {
 			dashboardTableArgs: {
 				fields: [
+					{
+						key: "warning",
+						label: "",
+						sortable: false
+					},
 					{
 						key: "finding_name",
 						label: "Finding Name",
@@ -239,8 +238,8 @@ DM22-1011
 						sortable: true
 					},
 					{
-						key: "created",
-						label: "Created",
+						key: "mitigated",
+						label: "Mitigated",
 						sortable: true
 					},
 					{
@@ -248,9 +247,18 @@ DM22-1011
 						label: "Updated",
 						sortable: true
 					},
+					{
+						key: "created_by",
+						label: "Created By",
+						sortable: true
+					},
+					{
+						key: "status",
+						label: "Status",
+						sortable: true
+					},
 				],
-				items: [],
-				sortBy: "finding_name"
+				items: []
 			},
 			severityArgs: {
 				options: {
@@ -372,9 +380,29 @@ DM22-1011
 			pageData.added_osinf_emails = true
 		{% endif %}
 
+		warnings_list = []
+
+		{% for w in warnings %}
+			warnings_list.push("{{w}}")
+		{% endfor %}
+
 		{% for i in object_list %}
 
-			pageData.dashboardTableArgs.items.push({finding_name: "{{i.uploaded_finding_name}}", assessment_type: "{{i.assessment_type}}", severity: "{{i.severity}}", created: "{{i.created_at | naturaltime}}", updated: "{{i.updated_at | naturaltime}}", url: "{% url 'finding_detail' i.slug %}"})
+			warning = false
+			
+			{% if i.uploaded_finding_name in warnings %}
+				warning = true
+			{% endif %}
+
+			mitigated = Math.round((1 - parseFloat("{{i.unmitigated}}")) * 100)
+			
+			{% if i.duplicate_finding_order > 0 %}
+				label = " " + "{{i.duplicate_finding_order}}".toString()
+			{% else %}
+				label = ""
+			{% endif %}
+
+			pageData.dashboardTableArgs.items.push({warning: warning, finding_name: "{{i.uploaded_finding_name}}" + label, assessment_type: "{{i.assessment_type}}", severity: "{{i.severity}}", mitigated: mitigated, created: "{{i.created_at | naturaltime}}", updated: "{{i.updated_at | naturaltime}}", created_by: "{{i.created_by}}", status: "{{i.status}}", url: "{% url 'finding_detail' i.slug %}"})
 
 		{% endfor %}
 

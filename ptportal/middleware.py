@@ -31,6 +31,7 @@ class LoginRequiredMiddleware:
         if not (
             request.user.is_authenticated
             or request.path_info in self.open_urls
+            or request.path_info.startswith('/api/')
             or password_reset
         ):
             return redirect(self.login_url)

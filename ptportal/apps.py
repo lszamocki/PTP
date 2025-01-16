@@ -16,6 +16,3 @@ from django.apps import AppConfig
 
 class PtportalConfig(AppConfig):
     name = 'ptportal'
-
-    def ready(self):
-        import ptportal.signals

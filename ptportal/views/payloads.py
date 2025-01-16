@@ -30,6 +30,26 @@ class PayloadResults(generic.base.TemplateView):
         context['description'] = Report.objects.all().first()
         context['security_solutions'] = serializers.serialize("json", SecuritySolution.objects.all())
         context['used_solutions'] = SecuritySolution.objects.filter(used=True)
+
+        missing = []
+
+        if context['description'].payload_testing_date == None:
+            missing.append("Payload Testing Date")
+        if context['description'].exception == "":
+            missing.append("Exception")
+        if context['description'].browser == "":
+            missing.append("Browser")
+
+        context['missing'] = ', '.join(missing)
+        
+        missing_protocols = []
+
+        for p in context['payloads']:
+            if p.c2_protocol == "":
+                missing_protocols.append(str(p.order))
+
+        context['missing_protocols'] = ', '.join(missing_protocols)
+
         return context
 
     def post(self, request, *args, **kwargs):
@@ -102,6 +122,8 @@ class PayloadResults(generic.base.TemplateView):
             payload = {'payload_description': data['payload_description'], 'c2_protocol': data['c2_protocol'], 'filename': ''}
             program.add_payload(payload)
             program.parse()
+            description = program.payloads[0].payload_description
+            c2_protocol = program.payloads[0].c2_protocol
             filetype = program.payloads[0].filetype
             codetype = program.payloads[0].codetype
             techniques = ', '.join(str(i) for i in program.payloads[0].techniques)
@@ -109,9 +131,9 @@ class PayloadResults(generic.base.TemplateView):
 
             if Payload.objects.filter(order=order + 1).exists():
                 obj = Payload.objects.filter(order=order + 1).first()
-                obj.payload_description=data['payload_description']
+                obj.payload_description=description
                 obj.attack_name=attack_name
-                obj.c2_protocol=data['c2_protocol']
+                obj.c2_protocol=c2_protocol
                 obj.host_protection=host
                 obj.border_protection=border
                 obj.file_types=filetype
@@ -123,9 +145,9 @@ class PayloadResults(generic.base.TemplateView):
                 try:
                     obj = Payload.objects.create(
                         order=order + 1,
-                        payload_description=data['payload_description'],
+                        payload_description=description,
                         attack_name=attack_name,
-                        c2_protocol=data['c2_protocol'],
+                        c2_protocol=c2_protocol,
                         host_protection=host,
                         border_protection=border,
                         file_types=filetype,
@@ -155,6 +177,12 @@ class PayloadObj(object):
         self.techniques = []
         self.filename = None
         self.c2_protocol = data["c2_protocol"]
+
+        self.StripCharacters()
+
+    def StripCharacters(self):
+        self.payload_description = self.payload_description.replace("\r", "")
+        self.payload_description = self.payload_description.replace("\n", " ")
 
     def concatenation(self):
         longname = ""

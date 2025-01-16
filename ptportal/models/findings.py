@@ -17,7 +17,10 @@ from django.template.defaultfilters import slugify
 from django.urls import reverse
 from django.contrib.contenttypes.fields import GenericForeignKey, GenericRelation
 from django.contrib.contenttypes.models import ContentType
+from django.utils.crypto import get_random_string
+from .users import *
 from collections import defaultdict
+from decimal import Decimal
 
 import datetime
 
@@ -49,8 +52,9 @@ class InformationalManager(models.Manager):
         return super().get_queryset().filter(severity__severity_name='Informational')
 
 
-class AffectedSystems(models.Model):
+class AffectedSystem(models.Model):
     name = models.CharField(max_length=150, blank=True)
+    uid = models.CharField(max_length=20, blank=True)
     ip = models.CharField(max_length=255, blank=True, null=True)
     ip_int = models.BigIntegerField(blank=True, null=True)
 
@@ -64,6 +68,8 @@ class AffectedSystems(models.Model):
                 sets[0] * 256**3 + sets[1] * 256**2 + sets[2] * 256 + sets[3]
             )
             self.name = self.ip
+        if not self.pk:
+            self.uid = get_random_string(length=20)
         super().save()
 
     class Meta:
@@ -90,11 +96,6 @@ class Severities(models.Model):
         return self.severity_name
 
 
-class InternalAndExternalAssessmentManager(models.Manager):
-    def get_queryset(self):
-        return super().get_queryset().filter(assessment_type='External/Internal')
-
-
 class ExternalAssessmentManager(models.Manager):
     def get_queryset(self):
         return super().get_queryset().filter(assessment_type='External')
@@ -115,11 +116,10 @@ class UploadedFindingsOrderManager(models.Manager):
         uploaded_findings = UploadedFinding.objects.all()
         order = uploaded_findings.annotate(
             custom_order=models.Case(
-                models.When(assessment_type="External/Internal", then=models.Value(0)),
-                models.When(assessment_type="External", then=models.Value(1)),
-                models.When(assessment_type="Internal", then=models.Value(2)),
-                models.When(assessment_type="Phishing", then=models.Value(3)),
-                default=models.Value(4),
+                models.When(assessment_type="External", then=models.Value(0)),
+                models.When(assessment_type="Internal", then=models.Value(1)),
+                models.When(assessment_type="Phishing", then=models.Value(2)),
+                default=models.Value(3),
                 output_field=models.IntegerField(),
             )
         ).order_by('custom_order', 'severity')
@@ -213,6 +213,8 @@ class BaseFinding(abstract_models.TimeStampedModel):
         verbose_name="If Specific, what's the general?", blank=True
     )
 
+    tags = models.TextField(blank=True)
+
     slug = models.SlugField(max_length=255, unique=True, blank=True)
 
     objects = models.Manager()
@@ -281,13 +283,12 @@ class SpecificFinding(BaseFinding):
 class UploadedFinding(abstract_models.TimeStampedModel):
 
     ASSESSMENT_TYPE_CHOICES = (
-        ('External/Internal', 'External/Internal'),
         ('External', 'External'),
         ('Internal', 'Internal'),
         ('Phishing', 'Phishing'),
     )
 
-    MITIGATION_CHOICES = ((True, 'Yes'), (False, 'No'))
+    STATUS_CHOICES = (('Draft', 'Draft'), ('Needs Review', 'Needs Review'), ('Complete', 'Complete'))
 
     MAGNITUDE_CHOICES = (
         ('', ''),
@@ -296,6 +297,9 @@ class UploadedFinding(abstract_models.TimeStampedModel):
         ('21-30', '21-30'),
         ('31+', '31+'),
     )
+
+    created_by = models.ForeignKey(User, on_delete=models.CASCADE)
+    last_validated = models.DateField(null=True, blank=True, default=datetime.date.today)
 
     finding = models.ForeignKey(
         BaseFinding,
@@ -308,6 +312,8 @@ class UploadedFinding(abstract_models.TimeStampedModel):
 
     uploaded_finding_name = models.CharField(max_length=50000)
     uploaded_finding_id = models.IntegerField(default=0)
+    duplicate_finding_order = models.IntegerField(default=0)
+    manually_added = models.BooleanField(default=True, blank=True)
 
     NIST_800_53 = models.TextField(blank=True)
     NIST_CSF = models.TextField(blank=True)
@@ -327,6 +333,12 @@ class UploadedFinding(abstract_models.TimeStampedModel):
         + 'from the database. Edit the \n'
         + 'text below to clarify the \n'
         + 'remediation for this specific case',
+    )
+
+    operator_notes = models.TextField(
+        blank=True,
+        verbose_name='Operator Notes',
+        help_text='Contains notes for operators that remain internal to the Reporting Engine instance',
     )
 
     timetable = models.TextField(blank=True, verbose_name='Recommendation Timetable')
@@ -352,18 +364,28 @@ class UploadedFinding(abstract_models.TimeStampedModel):
         help_text='What kind of assessment is this?',
     )
 
-    mitigation = models.BooleanField(
-        choices=MITIGATION_CHOICES,
-        verbose_name='Mitigation',
-        default=False,
-        help_text='Was this finding mitigated within the assessment timeframe?',
+    unmitigated = models.DecimalField(
+        verbose_name='Unmitigated Percentage',
+        max_digits=4,
+        decimal_places=2,
+        default=0,
+        help_text='What percent of affected systems are not mitigated?',
     )
 
+    status = models.CharField(
+        max_length=12,
+        choices=STATUS_CHOICES,
+        blank=True,
+        default='Draft',
+        verbose_name='Status',
+        help_text='Do the finding details still need to be modified or is it complete?')
+
     affected_systems = models.ManyToManyField(
-        AffectedSystems,
-        verbose_name='Affected Systems',
+        AffectedSystem,
+        verbose_name='Affected System',
         help_text='What affected system(s) does this finding relate to?',
         blank=True,
+        through='Mitigation'
     )
 
     screenshot_description = models.TextField(
@@ -401,6 +423,13 @@ class UploadedFinding(abstract_models.TimeStampedModel):
         verbose_name='Risk Score'
     )
 
+    mitigated_risk_score = models.IntegerField(
+        default=0,
+        blank=True,
+        null=True,
+        verbose_name='Mitigated Risk Score'
+    )
+
     slug = models.SlugField(max_length=255, blank=True)
 
     objects = UploadedFindingsOrderManager()
@@ -410,7 +439,6 @@ class UploadedFinding(abstract_models.TimeStampedModel):
     low = LowManager()
 
     informational = InformationalManager()
-    internal_and_external = InternalAndExternalAssessmentManager()
     external = ExternalAssessmentManager()
     internal = InternalAssessmentManager()
     phishing = PhishingAssessmentManager()
@@ -418,7 +446,50 @@ class UploadedFinding(abstract_models.TimeStampedModel):
     preferred_order = UploadedFindingsOrderManager()
 
     def save(self, *args, **kwargs):
-        self.slug = slugify(self.uploaded_finding_name)
+        if self.uploaded_finding_id == 0:
+            self.uploaded_finding_id = UploadedFinding.objects.all().count() + 1
+
+        self.slug = slugify(self.uploaded_finding_name + "-" + str(self.uploaded_finding_id))
+
+        affected_systems_count = Mitigation.objects.filter(finding=self).count()
+        unmitigated_systems_count = Mitigation.objects.filter(finding=self, mitigation=False).count()
+
+        if affected_systems_count > 0:
+            percent_unmitigated = unmitigated_systems_count/affected_systems_count
+            self.unmitigated = round(Decimal(percent_unmitigated), 2)
+        else:
+            self.unmitigated = 1
+
+
+        '''
+        ******************************************************************************
+         The mappings and risk score formula below should be adjusted based on the
+         methodology of the assessing entity. All values are placeholders and do not 
+         reflect an actual risk scoring methodology.
+        ******************************************************************************
+        '''
+        
+        sev_map = {'Critical': 10, 'High': 9, 'Medium': 8, 'Low': 7, 'Informational': 6}
+        mag_map = {'': 0, '1-10': 10, '11-20': 20, '21-30': 30, '31+': 40}
+        
+        try:
+            lkd = self.likelihood/100 + 1
+        except Exception as e:
+            lkd = 0
+            print(e)
+
+        try:
+            self.risk_score = int(sev_map[self.severity.severity_name] + lkd + mag_map[self.magnitude])
+        except Exception as e:
+            self.risk_score = 0
+            print(e)
+
+        try:
+            self.mitigated_risk_score = int(self.risk_score * self.unmitigated)
+        except Exception as e:
+            self.mitigated_risk_score = 0
+            print(e)
+
         super().full_clean()
         super().save(*args, **kwargs)
 
@@ -426,7 +497,31 @@ class UploadedFinding(abstract_models.TimeStampedModel):
         return reverse("index")
 
     def __str__(self):
-        return self.uploaded_finding_name
+        if self.duplicate_finding_order > 0:
+            return self.uploaded_finding_name + " " + str(self.duplicate_finding_order)
+        else:
+            return self.uploaded_finding_name
 
     class Meta:
         verbose_name_plural = 'Uploaded Findings'
+
+
+class Mitigation(models.Model):
+    MITIGATION_CHOICES = ((True, 'Yes'), (False, 'No'))
+    
+    system = models.ForeignKey(AffectedSystem, on_delete=models.CASCADE)
+    finding = models.ForeignKey(UploadedFinding, on_delete=models.CASCADE)
+    mitigation = models.BooleanField(
+        choices=MITIGATION_CHOICES,
+        verbose_name='Mitigation',
+        default=False,
+        help_text='Was this finding mitigated for this affected system?',
+    )
+    mitigation_date = models.DateField(null=True, blank=True)
+
+    def __str__(self):
+        return self.finding.uploaded_finding_name + ": " + self.system.name
+
+    class Meta:
+        verbose_name_plural = 'Affected System Mitigation'
+        ordering = ['finding', 'system']

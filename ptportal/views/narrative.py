@@ -26,7 +26,7 @@ from django.urls import reverse_lazy, reverse
 from django.db.models.functions import Lower
 import json
 from ptportal.forms import NarrativeForm
-from ptportal.models import Narrative, NarrativeType, Tools, ATTACK, NarrativeStep
+from ptportal.models import NarrativeBlock, NarrativeBlockStep, Narrative, NarrativeType, Tools, ATTACK, NarrativeStep, Report
 
 
 def ajax_get_narrative_images(request):
@@ -163,10 +163,42 @@ class NarrativeEdit(generic.edit.UpdateView):
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         narrative = self.get_object()
+        context['breadcrumb'] = str(self.get_object().assessment_type.name)
+        context['name'] = str(self.get_object().name) + " " + str(self.get_object().order)
         context['diagram'] = narrative.file
         context['all_tools'] = serializers.serialize("json", Tools.objects.all().order_by(Lower('name')))
         context['used_tools'] = serializers.serialize("json", narrative.tools.all())
         context['techniques'] = serializers.serialize("json", ATTACK.objects.all())
+
+        blocks = NarrativeStep.objects.filter(narrative=narrative).values_list('narrative_block', flat=True).distinct().order_by()
+        block_list = list(blocks)
+
+        recommended_tools = []
+        recommended_techs = []
+
+        for b in block_list:
+            try:
+                narrative_block = NarrativeBlock.objects.filter(name=b).first()
+                recommended_tools.extend(list(narrative_block.tools.all().values_list('name', flat=True)))
+                recommended_techs.extend(list(narrative_block.attack.all().values_list('name', flat=True)))
+            except:
+                continue
+
+        context['recommended_tools'] = list(set(recommended_tools))
+        context['recommended_techs'] = list(set(recommended_techs))
+
+        missing = []
+
+        if narrative.file == "":
+            missing.append("Attack Path Diagram")
+        if narrative.file != "" and narrative.caption == "":
+            missing.append("Attack Path Diagram Caption")
+        if narrative.tools.values_list().count() == 0:
+            missing.append("Tools")
+        if narrative.attack.values_list().count() == 0:
+            missing.append("MITRE ATT&CK Techniques")
+
+        context['missing'] = ', '.join(missing)
 
         return context
 
@@ -225,14 +257,14 @@ class NarrativeEdit(generic.edit.UpdateView):
                 print(e)
                 continue
 
-        tool_backup = narrative.tools
+        tool_backup = narrative.tools.all()
 
         try:
             narrative.tools.clear()
             narrative.tools.add(*tools)
         except Exception as e:
             print(e)
-            narrative.tools = tool_backup
+            narrative.tools.set(list(tool_backup))
 
         for i in postData['techniques']:
             try:
@@ -243,14 +275,14 @@ class NarrativeEdit(generic.edit.UpdateView):
                 print(e)
                 continue
 
-        attack_backup = narrative.attack
+        attack_backup = narrative.attack.all()
         
         try:
             narrative.attack.clear()
             narrative.attack.add(*techniques)
         except Exception as e:
             print(e)
-            narrative.attack = attack_backup
+            narrative.attack.set(list(attack_backup))
 
         narrative.save()
 
@@ -270,8 +302,41 @@ class NarrativeSteps(generic.base.TemplateView):
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
+        context['breadcrumb'] = str(self.get_object().assessment_type.name)
         context['name'] = str(self.get_object().name) + " " + str(self.get_object().order)
         context['steps'] = NarrativeStep.objects.filter(narrative=self.get_object())
+        context['blocks'] = NarrativeBlock.objects.all()
+        context['block_steps'] = NarrativeBlockStep.objects.all().order_by('narrative_block__name', 'order')
+        context['report'] = Report.objects.all().first()
+        
+        blocks = NarrativeStep.objects.filter(narrative=self.get_object()).values_list('narrative_block', flat=True).distinct().order_by()
+        block_list = list(blocks)
+
+        recommended_tools = []
+        recommended_techs = []
+
+        for b in block_list:
+            try:
+                narrative_block = NarrativeBlock.objects.filter(name=b).first()
+                recommended_tools.extend(list(narrative_block.tools.all().values_list('name', flat=True)))
+                recommended_techs.extend(list(narrative_block.attack.all().values_list('name', flat=True)))
+            except:
+                continue
+
+        context['recommended_tools'] = list(set(recommended_tools))
+        context['recommended_techs'] = list(set(recommended_techs))
+
+        missing_description = []
+        missing_caption = []
+
+        for s in context['steps']:
+            if s.description == "":
+                missing_description.append(str(s.order))
+            if s.file != "" and s.caption == "":
+                missing_caption.append(str(s.order))
+
+        context['missing_description'] = ', '.join(missing_description)
+        context['missing_caption'] = ', '.join(missing_caption)
 
         return context
 
@@ -286,7 +351,13 @@ class NarrativeSteps(generic.base.TemplateView):
                 obj = NarrativeStep.objects.get(uuid=data['uuid'])
                 obj.order = index + 1
                 obj.description = data['description']
+                obj.screenshot_help = data['recommendation']
                 obj.caption = data['caption']
+                obj.narrative_block = data['narrative_block']
+                if data['imgOrder'] is not None:
+                    filename = "file" + str(data['imgOrder'])
+                    file = request.FILES[filename]
+                    obj.file = file
                 obj.save()
                 uploadedSteps.append(obj)
 
@@ -297,16 +368,21 @@ class NarrativeSteps(generic.base.TemplateView):
                     obj = NarrativeStep.objects.create(
                         order = index + 1,
                         description = data['description'],
+                        screenshot_help = data['recommendation'],
                         caption = data['caption'],
                         file = file,
-                        narrative = narrative
+                        narrative = narrative,
+                        narrative_block = data['narrative_block']
                     )
 
                 else:
                     obj = NarrativeStep.objects.create(
                         order = index + 1,
                         description = data['description'],
-                        narrative = narrative
+                        screenshot_help = data['recommendation'],
+                        caption = data['caption'],
+                        narrative = narrative,
+                        narrative_block = data['narrative_block']
                     )
 
                 uploadedSteps.append(obj)
@@ -368,5 +444,27 @@ class Narratives(generic.ListView):
 
         self.assessment_type = get_object_or_404(NarrativeType, slug=self.kwargs['narrative_assessment_type'])
         context['paths'] = Narrative.objects.filter(assessment_type=self.assessment_type)
+
+        missing_details = []
+        missing_steps = []
+        missing_step_info = []
+
+        for n in context['paths']:
+            steps = NarrativeStep.objects.filter(narrative=n)
+            if n.file == "" or n.caption == "" or n.tools.values_list().count() == 0 or n.attack.values_list().count() == 0:
+                missing_details.append(str(n.order))
+            if steps.values_list().count() == 0:
+                missing_steps.append(str(n.order))
+            for s in steps:
+                if s.description == "":
+                    missing_step_info.append(str(n.order))
+                    break
+                elif s.file != "" and s.caption == "":
+                    missing_step_info.append(str(n.order))
+                    break
+
+        context['missing_details'] = ', '.join(missing_details)
+        context['missing_steps'] = ', '.join(missing_steps)
+        context['missing_step_info'] = ', '.join(missing_step_info)
 
         return context

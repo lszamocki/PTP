@@ -21,18 +21,20 @@ from django.contrib import messages
 from django.core import serializers
 from ...forms import UploadedFindingForm, EditUploadedFindingForm
 from ...models import (
-    AffectedSystems,
+    AffectedSystem,
     EngagementMeta,
     ImageFinding,
     BaseFinding,
     GeneralFinding,
     SpecificFinding,
     UploadedFinding,
+    Mitigation,
     Campaign,
     Payload,
     Severities,
     CIS_CSC,
     KEV,
+    Report,
 )
 from ..utils import (
     get_nist_csf,
@@ -40,6 +42,7 @@ from ..utils import (
     get_timetable,
 )
 from django.http import HttpResponse, JsonResponse
+from decimal import Decimal
 import json
 import ipaddress
 import os
@@ -67,11 +70,36 @@ class UploadedFindingUpdateView(generic.edit.UpdateView):
         context['kevs'] = serializers.serialize("json", KEV.objects.filter(found=True).order_by('cve_id'))
         context['selected_systems'] = serializers.serialize("json", finding.affected_systems.all())
         context['screenshots'] = ImageFinding.objects.filter(finding=finding)
-        context['affected_systems'] = serializers.serialize("json", AffectedSystems.objects.all())
+        context['affected_systems'] = serializers.serialize("json", AffectedSystem.objects.all())
+        context['mitigation'] = Mitigation.objects.filter(finding=finding)
+        context['report'] = Report.objects.all().first()
 
         engagement = EngagementMeta.object()
         context["engagement"] = engagement
         context["engagement_exists"] = True if engagement else False
+
+        missing_fields = []
+        unchanged_fields = []
+
+        if finding.description == finding.finding.description:
+            unchanged_fields.append("Finding Description")
+
+        if finding.remediation == finding.finding.remediation:
+            unchanged_fields.append("Finding Remediation")
+
+        if finding.affected_systems.values_list().count() == 0:
+            missing_fields.append("Affected Systems")
+
+        if context['screenshots'].values_list().count() == 0:
+            missing_fields.append("Screenshot(s)")
+        else:
+            if finding.screenshot_description == "":
+                missing_fields.append("Screenshot Description")
+            if context['screenshots'].filter(caption='').values_list().count() > 0:
+                missing_fields.append("Screenshot Caption(s)")
+                
+        context['missing'] = ', '.join(missing_fields)
+        context['unchanged'] = ', '.join(unchanged_fields)
 
         return context
 
@@ -79,42 +107,70 @@ class UploadedFindingUpdateView(generic.edit.UpdateView):
         postData = json.loads(request.POST['data'])
         finding = self.get_object()
 
+        affected_systems_data = json.loads(request.POST['systems'])
+
         affected_systems = []
+        mitigation_list = []
         kevs = []
         screenshots = []
 
         severity = Severities.objects.filter(severity_name=postData['findingSeverity']).first()
 
+        finding.last_validated = postData['lastValidated']
         finding.description = postData['findingDescription']
         finding.remediation = postData['findingRemediation']
+        finding.operator_notes = postData['operatorNotes']
         finding.severity = severity
         finding.assessment_type = postData['assessmentType']
-        finding.mitigation = False if postData['findingMitigation'] == 'False' else True
+        finding.status = postData['findingStatus']
         finding.screenshot_description = postData['screenshotDescription']
         finding.save()
 
-        for i in postData['affectedSystemList']:
-            if AffectedSystems.objects.filter(name=i['value']).exists():
-                affected_systems.append(AffectedSystems.objects.get(name=i['value']))
-
-            else:
+        for i in affected_systems_data:
+            if AffectedSystem.objects.filter(name=i['name']).exists():
                 try:
-                    system = AffectedSystems.objects.create(
-                        name = i['value']
-                    )
-                    affected_systems.append(system)
+                    obj = AffectedSystem.objects.get(name=i['name'])
+                    affected_systems.append(obj)
+
+                    if Mitigation.objects.filter(finding=finding, system=obj).exists():
+                        mit = Mitigation.objects.get(finding=finding, system=obj)
+                        mit.mitigation = i['mitigation']
+                        mit.mitigation_date = i['mitigation_date'] if i['mitigation_date'] and i['mitigation'] else None
+                        mit.save()
+                    else:
+                        mit = Mitigation.objects.create(
+                            system = obj,
+                            finding = finding,
+                            mitigation = i['mitigation'],
+                            mitigation_date = i['mitigation_date'] if i['mitigation_date'] and i['mitigation'] else None
+                        )
+                    mitigation_list.append(mit)
                 except Exception as e:
                     print(e)
                     continue
 
-        affected_system_backup = finding.affected_systems
+            else:
+                try:
+                    system = AffectedSystem.objects.create(
+                        name = i['name']
+                    )
+                    affected_systems.append(system)
 
-        try:
-            finding.affected_systems.clear()
-            finding.affected_systems.add(*affected_systems)
-        except Exception as e:
-            print(e)
-            finding.affected_systems = affected_system_backup
+                    mit = Mitigation.objects.create(
+                        system = system,
+                        finding = finding,
+                        mitigation = i['mitigation'],
+                        mitigation_date = i['mitigation_date'] if i['mitigation_date'] and i['mitigation'] else None
+                    )
+                    mitigation_list.append(mit)
+                except Exception as e:
+                    print(e)
+                    continue
+
+        deletedMitigation = set(Mitigation.objects.filter(finding=finding)) - set(mitigation_list)
+
+        for deleted in deletedMitigation:
+            deleted.delete()
 
         for i in postData['kevs']:
             try:
@@ -168,14 +224,7 @@ class UploadedFindingUpdateView(generic.edit.UpdateView):
 
         for deleted in deletedScreenshots:
             deleted.delete()
-
-        '''
-        ******************************************************************************
-         The mappings and risk score formula below should be adjusted based on the
-         methodology of the assessing entity. All values are placeholders and do not 
-         reflect an actual risk scoring methodology.
-        ******************************************************************************
-        '''
+        
         if reset:
             likelihood = None
         elif len(kevs) > 0:
@@ -184,21 +233,14 @@ class UploadedFindingUpdateView(generic.edit.UpdateView):
             likelihood = finding.likelihood
 
         finding.likelihood=likelihood
-
-        sev_map = {'Critical': 10, 'High': 9, 'Medium': 8, 'Low': 7, 'Informational': 6}
-        mag_map = {'': 0, '1-10': 10, '11-20': 20, '21-30': 30, '31+': 40}
-        sev = postData['findingSeverity']
-        mag = finding.magnitude
-
-        if likelihood == None:
-            lkd = 0
-        else:
-            lkd = likelihood
-                
-        score = sev_map[sev] + mag_map[mag] + lkd
-
-        finding.risk_score = score
         finding.save()
+
+        duplicate_findings = UploadedFinding.objects.filter(uploaded_finding_name=finding.uploaded_finding_name)
+
+        if duplicate_findings.values_list().count() > 1:
+            for i, obj in enumerate(duplicate_findings.order_by('severity', 'assessment_type', 'created_at'), start=1):
+                obj.duplicate_finding_order = i
+                obj.save()
 
         return HttpResponse(status=200)
 
@@ -216,10 +258,11 @@ class UploadedFindingCreateView(generic.edit.CreateView):
 
         uploaded_findings = [o.uploaded_finding_name for o in UploadedFinding.objects.all()]
 
-        context['findings'] = serializers.serialize("json", BaseFinding.objects.exclude(name__in=uploaded_findings).order_by('name'))
+        context['findings'] = serializers.serialize("json", BaseFinding.objects.all().order_by('name'))
+        context['uploaded_findings'] = uploaded_findings
         context['severity'] = Severities.objects.all()
         context['kevs'] = serializers.serialize("json", KEV.objects.filter(found=True).order_by('cve_id'))
-        context['affected_systems'] = serializers.serialize("json", AffectedSystems.objects.all())
+        context['affected_systems'] = serializers.serialize("json", AffectedSystem.objects.all())
 
         engagement = EngagementMeta.object()
         context["engagement"] = engagement
@@ -229,18 +272,24 @@ class UploadedFindingCreateView(generic.edit.CreateView):
 
     def post(self, request, *args, **kwargs):
         postData = json.loads(request.POST['data'])
-
+        affected_systems_data = json.loads(request.POST['systems'])
+        
         affected_systems = []
         kevs = []
 
-        for i in postData['affectedSystemList']:
-            if AffectedSystems.objects.filter(name=i['value']).exists():
-                affected_systems.append(AffectedSystems.objects.get(name=i['value']))
+        for i in affected_systems_data:
+            if AffectedSystem.objects.filter(name=i['name']).exists():
+                try:
+                    obj = AffectedSystem.objects.get(name=i['name'])
+                    affected_systems.append(obj)
+                except Exception as e:
+                    print(e)
+                    continue
 
             else:
                 try:
-                    system = AffectedSystems.objects.create(
-                        name = i['value']
+                    system = AffectedSystem.objects.create(
+                        name = i['name']
                     )
                     affected_systems.append(system)
                 except Exception as e:
@@ -264,57 +313,47 @@ class UploadedFindingCreateView(generic.edit.CreateView):
             kev = "False"
             likelihood = None
 
-        '''
-        ******************************************************************************
-         The mappings and risk score formula below should be adjusted based on the
-         methodology of the assessing entity. All values are placeholders and do not 
-         reflect an actual risk scoring methodology.
-        ******************************************************************************
-        '''
-        
-        if len(kevs) > 0:
-            kev = "True"
-            likelihood = 100
-        else:
-            kev = "False"
-            likelihood = None
-
-        sev_map = {'Critical': 10, 'High': 9, 'Medium': 8, 'Low': 7, 'Informational': 6}
-        sev = postData['findingSeverity']
-        mag = 0
-
-        if likelihood == None:
-            lkd = 0
-        else:
-            lkd = likelihood
-                
-        score = sev_map[sev] + mag + lkd
-
         try:
             finding = UploadedFinding.objects.create(
+                created_by = request.user,
                 finding = base_finding,
                 NIST_800_53 = base_finding.NIST_800_53,
                 NIST_CSF = base_finding.NIST_CSF,
                 CIS_CSC = base_finding.CIS_CSC,
                 uploaded_finding_name = postData['selectedFinding']['fields']['name'],
-                uploaded_finding_id = UploadedFinding.objects.all().count() + 1,
                 description = postData['findingDescription'],
                 remediation = postData['findingRemediation'],
+                operator_notes = postData['operatorNotes'],
                 severity = severity,
                 assessment_type = postData['assessmentType'],
-                mitigation = False if postData['findingMitigation'] == 'False' else True,
+                status = postData['findingStatus'],
                 screenshot_description = postData['screenshotDescription'],
-                likelihood = likelihood,
-                risk_score = score
+                likelihood = likelihood
             )
+
+            duplicate_findings = UploadedFinding.objects.filter(uploaded_finding_name=finding.uploaded_finding_name)
+
+            if duplicate_findings.values_list().count() > 1:
+                for i, obj in enumerate(duplicate_findings.order_by('severity', 'assessment_type', 'created_at'), start=1):
+                    obj.duplicate_finding_order = i
+                    obj.save()
+            
         except Exception as e:
             print(e)
             return HttpResponse(status=500)
 
-        try:
-            finding.affected_systems.add(*affected_systems)
-        except Exception as e:
-            print(e)
+        for sys in affected_systems_data:
+            try:
+                obj = AffectedSystem.objects.get(name=sys['name'])
+                mit = Mitigation.objects.create(
+                    system = obj,
+                    finding = finding,
+                    mitigation = sys['mitigation'],
+                    mitigation_date = sys['mitigation_date'] if sys['mitigation_date'] and sys['mitigation'] else None
+                )
+            except Exception as e:
+                print(e)
+                continue
         
         try:
             finding.KEV.add(*kevs)
@@ -351,6 +390,30 @@ class UploadedFindingDetail(generic.DetailView):
         context = super().get_context_data(**kwargs)
         finding = self.get_object()
         context['screenshots'] = ImageFinding.objects.filter(finding=finding)
+        context['report'] = Report.objects.all().first()
+
+        missing_fields = []
+        unchanged_fields = []
+
+        if finding.description == finding.finding.description:
+            unchanged_fields.append("Finding Description")
+
+        if finding.remediation == finding.finding.remediation:
+            unchanged_fields.append("Finding Remediation")
+
+        if finding.affected_systems.values_list().count() == 0:
+            missing_fields.append("Affected Systems")
+
+        if context['screenshots'].values_list().count() == 0:
+            missing_fields.append("Screenshot(s)")
+        else:
+            if finding.screenshot_description == "":
+                missing_fields.append("Screenshot Description")
+            if context['screenshots'].filter(caption='').values_list().count() > 0:
+                missing_fields.append("Screenshot Caption(s)")
+                
+        context['missing'] = ', '.join(missing_fields)
+        context['unchanged'] = ', '.join(unchanged_fields)
 
         return context
 
@@ -374,6 +437,17 @@ class UploadedFindingDelete(generic.edit.DeleteView):
             print("Unable to delete finding screenshots from media directory.")
 
         finding.delete()
+
+        duplicate_findings = UploadedFinding.objects.filter(uploaded_finding_name=finding.uploaded_finding_name)
+
+        if duplicate_findings.values_list().count() > 1:
+            for i, obj in enumerate(duplicate_findings.order_by('severity', 'assessment_type', 'created_at'), start=1):
+                obj.duplicate_finding_order = i
+                obj.save()
+        elif duplicate_findings.values_list().count() == 1:
+            obj = UploadedFinding.objects.get(uploaded_finding_name=finding.uploaded_finding_name)
+            obj.duplicate_finding_order = 0
+            obj.save()
 
         for i in UploadedFinding.objects.all():
             if finding_id < i.uploaded_finding_id:
