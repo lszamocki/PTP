@@ -55,19 +55,43 @@ DM22-1011
 	{
 		width: 35% !important;
 	}
+	.warningcard {
+	    width: 100%;
+	    font-size: 10pt;
+	    background-color: #FFE3CB;
+	    padding: 15px;
+	    border: 2px solid #F79322;
+	    text-align: left;
+	    overflow: auto;
+	}
+	.warningcard img {
+	    float: left;
+	    padding: 2px;
+	}
+	.warningcard p {
+	    
+	    padding: 0px 30px;
+	}
 </style>
 {% endblock %}
 
 {% block content %}
+	{% if missing %}
+		<div class="warningcard">
+			<img class="w-8 h-8" src="/static/icons/triangle-exclamation-solid.svg">
+			<p><b>Warning:</b> The following fields are missing values: {{missing}}</p>
+		</div>
+		<br>
+	{% endif %}
 <div class="col-span-5">
 		{% if object %}
 		<sds-section>
 			<div>
-				<div style="float:left">
-					<h2>{{report.report_type}} ID: {{object.asmt_id}}</h2>
+				<div style="float:left;">
+					<h2><b>{{report.report_type}} ID: {{object.asmt_id}}</b></h2>
 					<p>Last modified: {{object.updated_at | naturaltime}}</p>
 				</div>
-				<div style="float:right">
+				<div style="float:right;">
 					<sds-button variant="danger" @click="redirectLink('{% url "engagement_delete" %}')"><img class="w-8 h-8" src="/static/icons/trash-solid-white.svg" style="float:left; padding:3px 6px 0px 0px"> Delete</sds-button>
 				</div>
 			</div>
@@ -116,7 +140,11 @@ DM22-1011
 				</div>
 				<div class="col-span-3">
 					<h4><b>{{ form.customer_ci_type.label_tag }}</b></h4>
-					<sds-select v-model="formData.customer_ci_type" :options="ci_options"/>
+					<sds-select v-model="formData.customer_ci_type" :options="ci_options" @change="changeCI($event)"></sds-select>
+				</div>
+				<div class="col-span-3">
+					<h4><b>{{ form.customer_ci_subsector.label_tag }}</b></h4>
+					<sds-select v-model="formData.customer_ci_subsector" :options="subsector_options[formData.customer_ci_type]" :disabled="Boolean(!subsector)"></sds-select>
 				</div>
 			</div>
 		</sds-section>
@@ -288,17 +316,18 @@ DM22-1011
 	        	<span class="border-top border-dark"></span>
 	            <template #title><b>ADDITONAL INFORMATION</b></template>
 
+	            {% if report.report_type == 'RVA' or report.report_type == 'RPT' %}
 				<h4 class=""><b>{{form.traffic_light_protocol.label_tag}}</b><span class="text-red-500 text-sm"> * required</span></h4>
 				<span class="text-sm text-gray-600">
 					{{form.traffic_light_protocol.help_text}}
 				</span>
 				<sds-radio-group required v-bind="TLP_Button_Options" v-model="formData.traffic_light_protocol" class="mb-4"></sds-radio-group>
-
+				{% endif %}
 				<div class="grid form-spacing mb-2 fieldlabel">
 					<div>
 						<h4 class="mb-2"><b>Create Assessment ID</b><span class="text-red-500 text-sm"> * required</span></h4>
 						<span class="text-sm text-gray-600">
-							Assessment ID (Max Length: 8)
+							7-Digit VMA #
 						</span>
 						<!-- <sds-input v-model="formData.asmt_id" v-bind="asmt_idArgs" @update:model-value="validateAsmtID"></sds-input> -->
 					</div>
@@ -350,8 +379,9 @@ DM22-1011
 				customer_POC_name: "{{ object.customer_POC_name | escapejs }}",
 				customer_POC_email: "{{ object.customer_POC_email | escapejs }}",
 				customer_state: "{{ object.customer_state }}",
-				customer_sector: "{{ object.customer_sector }}",
-				customer_ci_type: "{{ object.customer_ci_type }}",
+				customer_sector: "{{ object.customer_sector | escapejs }}",
+				customer_ci_type: "{{ object.customer_ci_type | escapejs }}",
+				customer_ci_subsector: "{{ object.customer_ci_subsector | escapejs }}",
 				customer_location: "{{ object.customer_location | escapejs }}",
 				team_lead_name: "{{ object.team_lead_name | escapejs }}",
 				team_lead_email: "{{ object.team_lead_email | escapejs }}",
@@ -378,12 +408,12 @@ DM22-1011
 
 			//Argument data for components
 			asmt_idArgs: {
-				asmt_regexp: new RegExp("^(?:[a-zA-Z0-9]+)(?:$|\.[a-zA-Z0-9]+$)"),
+				asmt_regexp: new RegExp("^(?:[0-9]+){7}"),
 				required: true,
 				valid: false,
 				invalid: false,
 				maxlength: 8,
-				placeholder: "{{report.report_type}}" == "RPT" ? "####.##" : "1234"
+				placeholder: "0001234"
 			},
 			passwordArgs: {
 				type: "password",
@@ -486,6 +516,79 @@ DM22-1011
 				{ id: 17, value: 'Transportation Systems', text: 'Transportation Systems' },
 				{ id: 18, value: 'Water and Wastewater Systems', text: 'Water and Wastewater Systems' }
 		    ],
+		    subsector: (['Commercial Facilities', 'Energy', 'Government Facilities', 'Transportation Systems'].includes("{{ object.customer_ci_type | escapejs }}")) ? true : false,
+		    subsector_options: {
+		    	'Chemical': [
+		    		{ id: 1, value: 'N/A', text: 'N/A'}
+		    	],
+		    	'Commercial Facilities': [
+		    		{ id: 1, value: 'Entertainment and Media', text: 'Entertainment and Media'},
+			    	{ id: 2, value: 'Gaming', text: 'Gaming'},
+			    	{ id: 3, value: 'Lodging', text: 'Lodging'},
+			    	{ id: 4, value: 'Outdoor Events', text: 'Outdoor Events'},
+			    	{ id: 5, value: 'Public Assembly', text: 'Public Assembly'},
+			    	{ id: 6, value: 'Real Estate', text: 'Real Estate'},
+			    	{ id: 7, value: 'Retail', text: 'Retail'},
+			    	{ id: 8, value: 'Sports Leagues', text: 'Sports Leagues'}
+		    	],
+		    	'Communications': [
+		    		{ id: 1, value: 'N/A', text: 'N/A'}
+		    	],
+		    	'Critical Manufacturing': [
+		    		{ id: 1, value: 'N/A', text: 'N/A'}
+		    	],
+		    	'Dams': [
+		    		{ id: 1, value: 'N/A', text: 'N/A'}
+		    	],
+		    	'Defense Industrial Base': [
+		    		{ id: 1, value: 'N/A', text: 'N/A'}
+		    	],
+		    	'Emergency Services': [
+		    		{ id: 1, value: 'N/A', text: 'N/A'}
+		    	],
+		    	'Energy': [
+		    		{ id: 1, value: 'Electricity', text: 'Electricity'},
+		    		{ id: 2, value: 'Oil and Natural Gas', text: 'Oil and Natural Gas'}
+		    	],
+		    	'Financial Services': [
+		    		{ id: 1, value: 'N/A', text: 'N/A'}
+		    	],
+		    	'Food and Agriculture': [
+		    		{ id: 1, value: 'N/A', text: 'N/A'}
+		    	],
+		    	'Government Facilities': [
+		    		{ id: 1, value: 'Education Facilities', text: 'Education Facilities'},
+		    		{ id: 2, value: 'Election Infrastructure', text: 'Election Infrastructure'},
+		    		{ id: 3, value: 'National Monuments and Icons', text: 'National Monuments and Icons'}
+		    	],
+		    	'Healthcare and Public Health': [
+		    		{ id: 1, value: 'N/A', text: 'N/A'}
+		    	],
+		    	'Identifying Critical Infrastructure During COVID-19': [
+		    		{ id: 1, value: 'N/A', text: 'N/A'}
+		    	],
+		    	'Information Technology': [
+		    		{ id: 1, value: 'N/A', text: 'N/A'}
+		    	],
+		    	'Nuclear Reactors, Materials, and Waste': [
+		    		{ id: 1, value: 'N/A', text: 'N/A'}
+		    	],
+		    	'Sector-Specific Agencies': [
+		    		{ id: 1, value: 'N/A', text: 'N/A'}
+		    	],
+		    	'Transportation Systems': [
+		    		{ id: 1, value: 'Aviation', text: 'Aviation'},
+			    	{ id: 2, value: 'Freight Rail', text: 'Freight Rail'},
+			    	{ id: 3, value: 'Highway and Motor Carrier', text: 'Highway and Motor Carrier'},
+			    	{ id: 4, value: 'Maritime', text: 'Maritime'},
+			    	{ id: 5, value: 'Mass Transit and Passenger Rail', text: 'Mass Transit and Passenger Rail'},
+			    	{ id: 6, value: 'Pipeline', text: 'Pipeline'},
+			    	{ id: 7, value: 'Postal and Shipping', text: 'Postal and Shipping'}
+		    	],
+		    	'Water and Wastewater Systems': [
+		    		{ id: 1, value: 'N/A', text: 'N/A'}
+		    	]
+		    },
 			TLP_Button_Options: {
 				stacked: true,
 				options: [
@@ -580,6 +683,16 @@ DM22-1011
 
 	function pageMethods() {
 		pageFunctions = {
+			changeCI: function (event) {
+				this.formData.customer_ci_subsector = null
+				if (this.formData.customer_ci_type == 'Commercial Facilities' || this.formData.customer_ci_type == 'Energy' || this.formData.customer_ci_type == 'Government Facilities' || this.formData.customer_ci_type == 'Transportation Systems') {
+					this.subsector = true
+				}
+				else {
+					this.subsector = false
+					this.formData.customer_ci_subsector = "N/A"
+				}
+			},
 			validateForm: function () {
 				invalidFields = document.getElementsByClassName("form-control invalid")
 				if(invalidFields.length > 0) {
@@ -590,7 +703,6 @@ DM22-1011
 			},
 			submitEngagement: function (event) {
 				event.preventDefault()
-				if (!this.validateForm()) {return}
 				formattedData = JSON.parse(JSON.stringify(this.formData))
 				formattedData['hvas'] = this.HVATableArgs.items
 				fetch(window.location.href, {
@@ -605,7 +717,37 @@ DM22-1011
 						setTimeout(() => {this.redirectLink("{% url 'engagement_detail' %}")}, 2000)
 					}
 					else {
-						this.displayNotification({title: "Error Saving Data", variant: "danger", text: "Bad response received from server. Check for errors in forms and try again."})
+						if (response.statusText) {
+							errors = response.statusText
+							var errorList = errors.split('<ul class="errorlist">').join(',').split('<li>').join(',').split('</li>').join(',').split('</ul>').join(',').split(',')
+							errorList = errorList.filter(item => item)
+							errorHit = false
+							passwordHit = false
+
+							for (let i = 0; i < errorList.length; i++) {
+								if (errorList[i] == "confirm_report_password" && !passwordHit) {
+									this.displayNotification({title: "Error Saving Data", variant: "danger", text: "Invalid Report Password: " +errorList[i + 1]})
+									errorHit = true
+									passwordHit = true
+								}
+								else if (errorList[i] == "asmt_id") {
+									this.displayNotification({title: "Error Saving Data", variant: "danger", text: errorList[i + 1]})
+									errorHit = true
+								}
+								else if (errorList[i] == "report_password" && !passwordHit) {
+									this.displayNotification({title: "Error Saving Data", variant: "danger", text: "Invalid Report Password: " + errorList[i + 1]})
+									errorHit = true
+									passwordHit = true
+								}
+							}
+
+							if (!errorHit) {
+								this.displayNotification({title: "Error Saving Data", variant: "danger", text: "Bad response received from server. Check for errors in forms and try again."})
+							}
+						}
+						else {
+							this.displayNotification({title: "Error Saving Data", variant: "danger", text: "Bad response received from server. Check for errors in forms and try again."})
+						}
 					}
 				}).catch(error => {
 					this.displayNotification({text: error, title: "Error Saving Data", variant:"danger"})

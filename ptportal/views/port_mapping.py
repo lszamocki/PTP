@@ -26,6 +26,15 @@ class PortMapping(generic.base.TemplateView):
     def get_context_data(self, **kwargs):
         context = {}
         context['hosts'] = PortMappingHost.objects.all().order_by('order')
+
+        missing = []
+
+        for h in context['hosts']:
+            if h.ip == "" or h.hostname == "" or h.ports == "" or h.services == "":
+                missing.append(str(h.order))
+
+        context['missing'] = ', '.join(missing)
+
         return context
 
     def post(self, request, *args, **kwargs):

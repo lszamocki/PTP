@@ -32,4 +32,7 @@ def split(value, key):
 
 @register.filter
 def percentage(value):
-    return '{0:.2%}'.format(value)
+    try:
+        return '{0:.2%}'.format(value)
+    except:
+        return "N/A"

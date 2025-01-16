@@ -1,5 +1,5 @@
 {
-  "last_updated": "2023-11-16",
+  "last_updated": "2023-12-1",
   "revision": 2,
   "tools": {
     "AtomPePacker": {
@@ -714,6 +714,7 @@
       "Morphisec": {"old_names": []},
       "McAfee": {"old_names": []},
       "PC Matic": {"old_names": []},
+      "Secureworks Taegis Extended Detection and Response (XDR)": {"old_names":  []},
       "SentinelOne": {"old_names": []},
       "Sophos Central" : {"old_names": ["Sophos Cental"]},
       "Sophos Intercept X": {"old_names": []},

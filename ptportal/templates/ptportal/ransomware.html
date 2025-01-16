@@ -44,12 +44,51 @@ DM22-1011
   .space{
     padding: 4px;
   }
-  </style>
+  .warningcard {
+    width: 100%;
+    font-size: 10pt;
+    background-color: #FFE3CB;
+    padding: 15px;
+    border: 2px solid #F79322;
+    text-align: left;
+    overflow: auto;
+  }
+  .warningcard img {
+    float: left;
+    padding: 2px;
+  }
+  .warningcard p {
+    padding: 0px 30px;
+  }
+</style>
 {% endblock %}
 
 {% block content %}
+{% csrf_token %}
+
+{% if not scenarios and not ransomware %}
+  <div class="warningcard">
+    <img class="w-8 h-8" src="/static/icons/triangle-exclamation-solid.svg">
+    <p><b>Warning:</b> No ransomware results have been added.</p>
+  </div>
+  <br>
+{% elif not scenarios %}
+  <div class="warningcard">
+    <img class="w-8 h-8" src="/static/icons/triangle-exclamation-solid.svg">
+    <p><b>Warning:</b> Ransomware scenario data is missing.</p>
+  </div>
+  <br>
+{% endif %}
+
+{% if missing %}
+  <div class="warningcard">
+    <img class="w-8 h-8" src="/static/icons/triangle-exclamation-solid.svg">
+    <p><b>Warning:</b> The following rows are missing one or more values: {{missing}}</p>
+  </div>
+  <br>
+{% endif %}
+
 <div class="col-span-5">
-  {% csrf_token %}
     <sds-section class="col-span-5" type="accented">
         <span class="border-top border-dark"></span>
             <template #title><b>RESULTS</b></template>

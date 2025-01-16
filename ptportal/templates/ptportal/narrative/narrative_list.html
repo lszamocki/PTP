@@ -15,9 +15,63 @@ DM22-1011
 {% extends 'ptportal/base.html' %}
 {% load humanize %}
 {% block active %}#narrative{% endblock %}
-{% block content %}
-{% csrf_token %}
 
+{% block style %}
+<style>
+    .warningcard {
+        width: 100%;
+        font-size: 10pt;
+        background-color: #FFE3CB;
+        padding: 15px;
+        border: 2px solid #F79322;
+        text-align: left;
+        overflow: auto;
+    }
+    .warningcard img {
+        float: left;
+        padding: 2px;
+    }
+    .warningcard p {
+        padding: 0px 30px;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+
+{% if not paths %}
+    <div class="warningcard">
+        <img class="w-8 h-8" src="/static/icons/triangle-exclamation-solid.svg">
+        <p><b>Warning:</b> No {{narrative_assessment_type}}s have been added.</p>
+    </div>
+    <br>
+{% endif %}
+
+{% if missing_details %}
+    <div class="warningcard">
+        <img class="w-8 h-8" src="/static/icons/triangle-exclamation-solid.svg">
+        <p><b>Warning:</b> The following attack paths are missing details: {{missing_details}}</p>
+    </div>
+    <br>
+{% endif %}
+
+{% if missing_steps %}
+    <div class="warningcard">
+        <img class="w-8 h-8" src="/static/icons/triangle-exclamation-solid.svg">
+        <p><b>Warning:</b> The following attack paths are missing steps: {{missing_steps}}</p>
+    </div>
+    <br>
+{% endif %}
+
+{% if missing_step_info %}
+    <div class="warningcard">
+        <img class="w-8 h-8" src="/static/icons/triangle-exclamation-solid.svg">
+        <p><b>Warning:</b> The following attack paths are missing information for one or more steps: {{missing_step_info}}</p>
+    </div>
+    <br>
+{% endif %}
+
+{% csrf_token %}
 
     <div style="float:right; position:absolute; top:65; right:20; z-index:100">
         <sds-button variant="primary" @click="redirectLink('{% url "narrative_create" narrative_assessment_type.name|lower %}')"><img class="w-8 h-8" src="/static/icons/circle-plus-solid-white.svg" style="float:left; padding:3px 6px 0px 0px"> Attack Path</sds-button>

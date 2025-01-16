@@ -76,7 +76,7 @@ class Tools(models.Model):
 class ATTACK(models.Model):
     t_id = models.CharField(verbose_name="MITRE ATT&CK Technique ID", max_length=20, unique=True)
     name = models.CharField(verbose_name="MITRE ATT&CK Technique Name", max_length=200, unique=True)
-    tactics = models. CharField(verbose_name="MITRE ATT&CK Tactic(s)", max_length=200)
+    tactics = models.CharField(verbose_name="MITRE ATT&CK Tactic(s)", max_length=200)
     description = models.TextField(verbose_name="MITRE ATT&CK Technique Description", max_length=4000, blank=True)
     url = models.CharField(verbose_name="MITRE ATT&CK Technique URL", max_length=100, blank=True)
     is_subtechnique = models.BooleanField(default=False, blank=True)
@@ -86,6 +86,64 @@ class ATTACK(models.Model):
 
     class Meta:
         verbose_name_plural = 'ATT&CK Techniques'
+
+
+class NarrativeBlock(abstract_models.TimeStampedModel):
+    name = models.CharField(max_length=200)
+
+    tools = models.ManyToManyField(
+        Tools,
+        verbose_name='Tools',
+        blank=True
+    )
+
+    attack=models.ManyToManyField(
+        ATTACK,
+        verbose_name='MITRE ATT&CK Technique',
+        blank=True
+    )
+
+    class Meta:
+        verbose_name_plural = "Narrative Blocks"
+        ordering = ['name']
+
+    def save(self, *args, **kwargs):
+        self.slug = slugify(self.name)
+        super().full_clean()
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return self.name
+
+
+class NarrativeBlockStep(abstract_models.TimeStampedModel):
+    narrative_block = models.ForeignKey(
+        NarrativeBlock, 
+        null=True, 
+        blank=True,
+        related_name="steps",
+        on_delete=models.CASCADE,
+        verbose_name="Associated Narrative Block",
+    )
+
+    order = models.PositiveIntegerField(blank=True, default=1)
+
+    description = models.CharField(
+        max_length=5000, verbose_name="Step Description", blank=True
+    )
+    screenshot_help = models.CharField(
+        max_length=500, verbose_name="Screenshot Help Text", blank=True
+    )
+    file = models.ImageField(upload_to=define_uploadpath_steps, blank=True)
+    caption = models.CharField(max_length=250, blank=True)
+    uuid = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    
+    class Meta:
+        verbose_name_plural = "Narrative Block Steps"
+        ordering = ['narrative_block', 'order']
+
+    def __str__(self):
+        return f"{self.narrative_block.name}: Step {self.order}"    
 
 
 class Narrative(abstract_models.TimeStampedModel):
@@ -144,10 +202,17 @@ class NarrativeStep(abstract_models.TimeStampedModel):
         verbose_name="Associated Narrative",
     )
 
+    narrative_block = models.CharField(
+        max_length=500, verbose_name="Associated Narrative Block", null=True, blank=True
+    )
+
     order = models.PositiveIntegerField(blank=True, default=1)
 
     description = models.CharField(
         max_length=5000, verbose_name="Step Description", blank=True
+    )
+    screenshot_help = models.CharField(
+        max_length=500, verbose_name="Screenshot Help Text", blank=True
     )
     file = models.ImageField(upload_to=define_uploadpath_steps, blank=True)
     caption = models.CharField(max_length=250, blank=True)

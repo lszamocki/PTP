@@ -17,6 +17,10 @@ from ptportal.models import (
     EngagementMeta,
     HVATarget,
     HVAData,
+    AffectedSystem,
+    Mitigation,
+    SpecificFinding,
+    UploadedFinding
 )
 
 
@@ -42,3 +46,28 @@ class HVASerializer(serializers.ModelSerializer):
     class Meta:
         model = HVAData
         fields = "__all__"
+
+
+class AffectedSystemSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = AffectedSystem
+        fields = "__all__"
+
+
+class MitigationSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Mitigation
+        fields = "__all__"
+
+
+class SpecificFindingSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = SpecificFinding
+        fields = "__all__"
+
+
+class UploadedFindingSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = UploadedFinding
+        fields = "__all__"
+

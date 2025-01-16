@@ -224,18 +224,11 @@ DM22-1011
           //If a function called pageCreated exists on the page that will be ran at the end of the lifecycle.
           created()
           {
-            {% if report_type == 'RVA' %}
+            {% if report_type == 'RVA' or report_type == 'RPT' %}
               phishingTabs = {
                 id: 20,
                 title: "Phishing",
                 items: [this.phishingLinks['payloads'], this.phishingLinks['campaigns']],
-                iconUrl: "{% static 'icons/envelope.svg' %}"
-              }
-            {% elif report_type == 'RPT' %}
-              phishingTabs = {
-                id: 20,
-                title: "Phishing",
-                items: [this.phishingLinks['payloads']],
                 iconUrl: "{% static 'icons/envelope.svg' %}"
               }
             {% else %}
@@ -254,23 +247,16 @@ DM22-1011
                 items: [this.serviceLinks['port'], this.serviceLinks['data_exfil'], this.serviceLinks['ransomware']],
                 iconUrl: "{% static 'icons/gear-solid.svg' %}"
               }
-            {% elif report_type == 'RPT' %}
+            {% else %}
               serviceTabs = {
                 id: 30,
                 title: "Services",
                 items: [this.serviceLinks['port'], this.serviceLinks['osinf']],
                 iconUrl: "{% static 'icons/gear-solid.svg' %}"
               }
-            {% else %}
-              serviceTabs = {
-                id: 30,
-                title: "Services",
-                items: [this.serviceLinks['port']],
-                iconUrl: "{% static 'icons/gear-solid.svg' %}"
-              }
             {% endif %}
 
-            {% if report_type == 'RVA' %}
+            {% if report_type == 'RVA' or report_type == 'RPT' %}
               narrativeTabs = {
                 id: 40,
                 title: "Narrative",
@@ -287,7 +273,9 @@ DM22-1011
             {% endif %}
 
             this.layoutArgs.sidebarNavigationItems.splice(3, 0, narrativeTabs)
+            {% if report_type == 'RVA' or report_type == 'RPT' %}
             this.layoutArgs.sidebarNavigationItems.splice(3, 0, serviceTabs)
+            {% endif %}
             this.layoutArgs.sidebarNavigationItems.splice(3, 0, phishingTabs)
 
             for(let tab in this.layoutArgs.sidebarNavigationItems){

@@ -28,6 +28,19 @@ class Campaigns(generic.base.TemplateView):
         context = {}
         context['campaigns'] = Campaign.objects.all().order_by('order')
         context['report'] = Report.objects.all().first()
+
+        missing_results = []
+        missing_descriptions = []
+
+        for c in context['campaigns']:
+            if c.emails_sent == None or c.emails_delivered == None or c.total_clicks == None or c.unique_clicks == None or c.time_to_first_click == None or c.length_of_campaign == None:
+                missing_results.append(str(c.order))
+            if c.campaign_description == "":
+                missing_descriptions.append(str(c.order))
+
+        context['missing_results'] = ', '.join(missing_results)
+        context['missing_descriptions'] = ', '.join(missing_descriptions)
+
         return context
 
     def post(self, request, *args, **kwargs):

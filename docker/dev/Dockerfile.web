@@ -1,24 +1,24 @@
-FROM python:3.8 as ptportalWebBase
+FROM python:3.8 as ptportal-web-base
 
 RUN apt-get update && apt-get install -y \
   p7zip-full \
   nano \
+  npm \
   zip
 
 ADD docker/dev/requirements.txt .
 RUN pip install --upgrade pip && \
     pip install -r requirements.txt
 
+COPY node /code/node
+RUN cd /code && npm install -D node/dependencies/tailwindcss-3 --legacy-peer-deps \
+  && npm install -D node/dependencies/components-vue3 --legacy-peer-deps
 
-FROM python:3.8
+
+FROM ptportal-web-base
 
 ENV PYTHONDONTWRITEBYTECODE 1
 ENV PYTHONUNBUFFERED 1
-
-COPY --from=ptportalWebBase /usr/local/lib/python3.8/site-packages/ /usr/local/lib/python3.8/site-packages/
-COPY --from=ptportalWebBase /usr/local/bin/ /usr/local/bin/
-COPY --from=ptportalWebBase /usr/bin/ /usr/bin/
-COPY --from=ptportalWebBase /bin/ /bin/
 
 RUN mkdir -p /code/pentestportal/media
 WORKDIR /code

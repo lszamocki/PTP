@@ -249,7 +249,7 @@ def generateEntryJson(filename):
     else:
         report_type = report.report_type
 
-    asmt_id = "RV" + engagement.asmt_id
+    asmt_id = "VMA" + engagement.asmt_id
     start_date = ""
     end_date = ""
 
@@ -287,12 +287,13 @@ def generateEntryJson(filename):
         'fiscal_year': fiscal_year,
         'sector': engagement.customer_sector,
         'critical_infrastructure_sector': engagement.customer_ci_type,
+        'critical_infrastructure_subsector': engagement.customer_ci_subsector,
         'testing_start_date': str(start_date),
         'testing_completion_date': str(end_date),
         'state': engagement.customer_state
     }
 
-    findings = UploadedFinding.objects.all()
+    findings = UploadedFinding.objects.all().order_by('severity', 'assessment_type', 'uploaded_finding_name', 'created_at')
     findings_list = []
     total_risk_score = 0
     mitigated_risk_score = 0
@@ -300,7 +301,10 @@ def generateEntryJson(filename):
     for finding in findings:
         if finding.finding.finding_type == "specific":
             general_finding_name = finding.finding.gen_finding
-            specific_finding_name = finding.finding.name
+            if finding.duplicate_finding_order > 0:
+                specific_finding_name = finding.finding.name + " " + str(finding.duplicate_finding_order)
+            else:
+                specific_finding_name = finding.finding.name
         else:
             general_finding_name = finding.finding.name
             specific_finding_name = "N/A"
@@ -310,33 +314,44 @@ def generateEntryJson(filename):
         else:
             kev = False
 
-        if report.report_type == "RVA":
+        if finding.unmitigated == 1:
+            mitigation_status = "No Action Taken"
+        elif finding.unmitigated > 0:
+            mitigation_status = "Partially Mitigated"
+        else:
+            mitigation_status = "Fully Mitigated"
+
+        if report.report_type == "RVA" or report.report_type == "RPT":
+            last_validated = "N/A"
             total_risk_score += finding.risk_score
-
-            if not finding.mitigation:
-                mitigated_risk_score += finding.risk_score
-                mitigation_status = "No Action Taken"
-            else:
-                mitigation_status = "Fully Mitigated"
-
+            mitigated_risk_score += finding.mitigated_risk_score
             finding_risk_score = finding.risk_score
 
         else:
-            if not finding.mitigation:
-                mitigation_status = "No Action Taken"
-            else:
-                mitigation_status = "Fully Mitigated"
-
+            last_validated = str(finding.last_validated.strftime('%Y-%m-%d'))
             finding_risk_score = "N/A"
 
+        affected_systems = []
+        mit = Mitigation.objects.filter(finding=finding)
+
+        for m in mit:
+            affected_systems.append({
+                'uid': str(m.system.uid),
+                'mitigation_status': "Mitigated" if m.mitigation else "Not Mitigated",
+                'mitigation_date': str(m.mitigation_date) if m.mitigation_date and m.mitigation else ""
+            })
+
         findings_list.append({
+            'finding_id': finding.pk,
             'finding_category': str(finding.finding.category),
             'general_finding_name': general_finding_name,
             'specific_finding_name': specific_finding_name,
             'severity': str(finding.severity.severity_name),
             'location': finding.assessment_type,
             'date_generated': str(finding.created_at.strftime('%Y-%m-%d')),
+            'last_validated': last_validated,
             'kev': kev,
+            'affected_systems': affected_systems,
             'mitigation_status': mitigation_status,
             'date_of_mitigation': "",
             'mitigation_action': "",
@@ -404,7 +419,7 @@ def generateEntryJson(filename):
             tactic_list = {}
             technique_name = ""
             if ATTACK.objects.filter(t_id="T"+technique).exists():
-                attack = ATTACK.objects.filter(t_id="T"+technique).first() 
+                attack = ATTACK.objects.filter(t_id="T"+technique).first()
                 technique_name = attack.name
                 tactics = attack.tactics.split(", ")
 
@@ -450,7 +465,7 @@ def generateEntryJson(filename):
             'campaigns': campaign_list,
             'payloads': payload_list
         }
-        
+
     else:
         sec_solutions = SecuritySolution.objects.all()
         sec_solutions_list = []
@@ -475,10 +490,15 @@ def generateEntryJson(filename):
         tool_list = []
 
         for a in narrative.attack.all():
-            attack_list.append(a.t_id)
+            attack_list.append({
+                'id': a.t_id,
+                'tactic': a.tactics,
+                'name': a.name,
+                'is_subtechnique': a.is_subtechnique
+            })
         for t in narrative.tools.all():
             tool_list.append(t.name)
-        
+
         narrative_list.append({
             'location': str(narrative.assessment_type),
             'mitre_techniques': attack_list,
@@ -712,7 +732,38 @@ def generateEntryJson(filename):
         'total_open_ports': total_open_ports,
         'open_ports': port_mapping_list
     }
+    """
+    mfa_vendors = MFAVendor.objects.all()
+    mfa_types = MFAType.objects.all()
+    mfa_vendor_list = []
+    mfa_type_list = []
+    
+    if report.report_type == "FAST":
+        asmt_data['multifactor_authentication'] = {
+            'mfa_status': "N/A",
+            'mfa_location': "N/A",
+            'mfa_vendors': mfa_vendor_list,
+            'mfa_type': mfa_type_list,
+            'mfa_notes': "N/A"
+        }
+        
+    else:    
+        for vendor in mfa_vendors:
+            if vendor.used:
+                mfa_vendor_list.append(vendor.mfa_vendor)
 
+        for typ in mfa_types:
+            if typ.used:
+                mfa_type_list.append(typ.mfa_type)
+
+        asmt_data['multifactor_authentication'] = {
+            'mfa_status': report.mfa_status,
+            'mfa_location': report.mfa_location,
+            'mfa_vendors': mfa_vendor_list,
+            'mfa_type': mfa_type_list,
+            'mfa_notes': report.mfa_notes
+        }
+    """
     with open(filename, "wb+") as f:
         f.write(json.dumps(asmt_data).encode())
 
@@ -740,7 +791,7 @@ def generateElectionJson(filename):
     else:
         report_type = report.report_type
 
-    asmt_id = "RV" + engagement.asmt_id
+    asmt_id = "VMA" + engagement.asmt_id
     start_date = ""
     end_date = ""
 
@@ -795,15 +846,15 @@ def generateElectionJson(filename):
         questionnaire[0].pop('created_at')
         questionnaire[0].pop('updated_at')
         elec_data['questionnaire'] = questionnaire[0]
+
+        security = {"": "", "1": "Least Secure", "2": "Moderately Secure", "3": "Secure", "4": "Very Secure", "5": "Most Secure", "TBD": "TBD"}
+        questions = {"q24": elec_data['questionnaire']['q24'], "q25": elec_data['questionnaire']['q25'], "q26": elec_data['questionnaire']['q26'], "q27": elec_data['questionnaire']['q27']}
+
+        for q in questions:
+            elec_data['questionnaire'][q] = security[questions[q]]
     else:
         elec_data['questionnaire'] = {}
 
-    security = {"": "", "1": "Least Secure", "2": "Moderately Secure", "3": "Secure", "4": "Very Secure", "5": "Most Secure", "TBD": "TBD"}
-    questions = {"q24": elec_data['questionnaire']['q24'], "q25": elec_data['questionnaire']['q25'], "q26": elec_data['questionnaire']['q26'], "q27": elec_data['questionnaire']['q27']}
-    
-    for q in questions:
-        elec_data['questionnaire'][q] = security[questions[q]]
-    
     with open(filename, "wb+") as f:
         f.write(json.dumps(elec_data).encode())
 
@@ -825,7 +876,7 @@ def gen_ptp_filename(
 
 def serializeJSON(filename=None):
     # Get uploaded findings in order of External -> Internal -> Phishing(Critical-Low)
-    uploaded_findings = UploadedFinding.objects.all().order_by('severity', 'assessment_type', 'uploaded_finding_name')
+    uploaded_findings = UploadedFinding.objects.all().order_by('severity', 'assessment_type', 'uploaded_finding_name', 'created_at')
     eng_meta_serializer = EngagementSerializer(EngagementMeta.objects.all(), many=True)
     eng_meta_model = str(EngagementMeta._meta)
     all_data = list(CIS_CSC.objects.all().order_by('CIS_ID')) \
@@ -834,7 +885,8 @@ def serializeJSON(filename=None):
         + list(uploaded_findings) \
         + list(EngagementMeta.objects.all()) \
         + list(ImageFinding.objects.all().order_by('finding', 'order')) \
-        + list(AffectedSystems.objects.all().order_by('name')) \
+        + list(AffectedSystem.objects.all().order_by('name')) \
+        + list(Mitigation.objects.all().order_by('finding', 'system')) \
         + list(KEV.objects.all()) \
         + list(DataExfil.objects.all().order_by('order')) \
         + list(Campaign.objects.all().order_by('order')) \
@@ -844,6 +896,8 @@ def serializeJSON(filename=None):
         + list(PortMappingHost.objects.all().order_by('order')) \
         + list(ElectionSystems.objects.all()) \
         + list(ElectionInfrastructureQuestionnaire.objects.all()) \
+        + list(NarrativeBlock.objects.all().order_by('name')) \
+        + list(NarrativeBlockStep.objects.all().order_by('narrative_block', 'order')) \
         + list(NarrativeType.objects.all().order_by('name')) \
         + list(Tools.objects.all().order_by('name')) \
         + list(ATTACK.objects.all().order_by('t_id')) \
@@ -863,6 +917,7 @@ def serializeJSON(filename=None):
         + list(Artifact.objects.all().order_by('order')) \
         + list(BreachMetrics.objects.all()) \
         + list(BreachedEmail.objects.all())
+        
 
     data = JSONserializers.serialize("json", all_data)
     if not filename:
@@ -870,8 +925,11 @@ def serializeJSON(filename=None):
     data_aat = data[:-1] + data[-1:]
 
     with open(filename, "wb+") as f:
-        f.write(data_aat.encode())
-    
+        try:
+            f.write(data_aat.encode())
+        except Exception as e:
+            print(e)
+
     return filename
 
 

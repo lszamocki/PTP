@@ -34,6 +34,7 @@ urlpatterns += [
     path('generate-EI-JSON/', views.generate_EI_json, name='generate_EI_json'),
     path('generate-report/', views.generate_report, name='generate_report'),
     path('generate-kev-report/', views.generate_kevs, name='generate_kev_report'),
+    path('generate-csv-report/', views.generate_csv, name='generate_csv'),
     path('generate-outbrief/', views.generate_outbrief, name='generate_outbrief'),
     path('generate-outbrief-ws/', views.generate_outbrief_ws, name='generate_outbrief_ws'),
     path('generate-tracker/', views.generate_tracker, name='generate_tracker'),

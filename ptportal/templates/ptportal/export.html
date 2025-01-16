@@ -56,7 +56,7 @@ DM22-1011
 }
 
 .errorcard {
-    width: 80%;
+    width: 100%;
     font-size: 10pt;
     background-color: #FFEFF2;
     padding: 15px;
@@ -71,12 +71,11 @@ DM22-1011
 }
 
 .errorcard p {
-    float: left;
-    padding: 0px 10px;
+    padding: 0px 30px;
 }
 
 .warningcard {
-    width: 80%;
+    width: 100%;
     font-size: 10pt;
     background-color: #FFE3CB;
     padding: 15px;
@@ -91,8 +90,7 @@ DM22-1011
 }
 
 .warningcard p {
-    float: left;
-    padding: 0px 10px;
+    padding: 0px 30px;
 }
 
 </style>
@@ -101,15 +99,11 @@ DM22-1011
 {% block content %}
 {% csrf_token %}
 
-<sds-section v-bind="exportArgs" class="mb-4" align="center">
-
     {% if not eng_meta %}
     <div class="errorcard">
         <img class="w-8 h-8" src="/static/icons/circle-xmark-solid.svg">
         <p><b>Missing Assessment Details:</b> The required fields on the Assessment Details form must be completed before generating artifacts.</p>
-        <br>
     </div>
-
     <br>
     {% endif %}
 
@@ -117,11 +111,87 @@ DM22-1011
     <div class="errorcard">
         <img class="w-8 h-8" src="/static/icons/circle-xmark-solid.svg">
         <p><b>Missing Risk Score Information:</b> All fields on the Risk Scoring page must be completed before generating certain artifacts.</p>
-        <br>
     </div>
-
     <br>
     {% endif %}
+
+    {% if missing_engagement %}
+    <div class="warningcard">
+        <img class="w-8 h-8" src="/static/icons/triangle-exclamation-solid.svg">
+        <p><b>Warning:</b> One or more values in Assessment Details are blank.</p>
+    </div>
+    <br>
+    {% endif %}
+
+    {% if not findings or missing_finding %}
+    <div class="warningcard">
+        <img class="w-8 h-8" src="/static/icons/triangle-exclamation-solid.svg">
+        <p><b>Warning:</b> Finding data is missing or incomplete.</p>
+    </div>
+    <br>
+    {% endif %}
+
+    {% if report.report_type == 'RVA' or report.report_type == 'RPT' %}
+        {% if not payloads or missing_payload or not used_solutions %}
+        <div class="warningcard">
+            <img class="w-8 h-8" src="/static/icons/triangle-exclamation-solid.svg">
+            <p><b>Warning:</b> Payload data is missing or incomplete.</p>
+        </div>
+        <br>
+        {% endif %}
+    {% endif %}
+
+    {% if report.report_type == 'RVA' or report.report_type == 'FAST' %}
+        {% if not campaigns or missing_campaign %}
+        <div class="warningcard">
+            <img class="w-8 h-8" src="/static/icons/triangle-exclamation-solid.svg">
+            <p><b>Warning:</b> Campaign data is missing or incomplete.</p>
+        </div>
+        <br>
+        {% endif %}
+    {% endif %}
+
+    {% if missing_services %}
+        <div class="warningcard">
+            <img class="w-8 h-8" src="/static/icons/triangle-exclamation-solid.svg">
+            <p><b>Warning:</b> The following service data is missing or incomplete: {{missing_services}}</p>
+        </div>
+        <br>
+    {% endif %}
+
+    {% if missing_narrative_type %}
+        <div class="warningcard">
+            <img class="w-8 h-8" src="/static/icons/triangle-exclamation-solid.svg">
+            <p><b>Warning:</b> The following narrative sections are missing attack paths: {{missing_narrative_type}}</p>
+        </div>
+        <br>
+    {% endif %}
+
+    {% if missing_narrative_data %}
+        <div class="warningcard">
+            <img class="w-8 h-8" src="/static/icons/triangle-exclamation-solid.svg">
+            <p><b>Warning:</b> The following attack paths are missing data: {{missing_narrative_data}}</p>
+        </div>
+        <br>
+    {% endif %}
+
+    {% if not found_kevs %}
+        <div class="warningcard">
+            <img class="w-8 h-8" src="/static/icons/triangle-exclamation-solid.svg">
+            <p><b>Warning:</b> No KEVs have been added.</p>
+        </div>
+        <br>
+    {% endif %}
+
+    {% if missing_report %}
+        <div class="warningcard">
+            <img class="w-8 h-8" src="/static/icons/triangle-exclamation-solid.svg">
+            <p><b>Warning:</b> One or more report fields are blank.</p>
+        </div>
+        <br>
+    {% endif %}
+
+<sds-section v-bind="exportArgs" class="mb-4" align="center">
 
     <!--<div class="warningcard">
         <img class="w-8 h-8" src="/static/icons/triangle-exclamation-solid.svg">
@@ -462,6 +532,40 @@ DM22-1011
     </div>
     {% endif %}
 
+    {% if report.report_type == 'FAST' %}
+    <div class="card">
+        <div class="card-inner" align="center">
+            <img src="/static/icons/file-csv-solid.svg">
+            <h1>Findings CSV</h1>
+            <p>Download a CSV file containing findings details</p>
+            {% if eng_meta %}
+            <sds-button variant="primary" size="sm" @click="redirectLink('{% url "generate_csv" %}')">Export</sds-button>
+            {% else %}
+            <sds-floating-ui
+                popper-class="absolute bg-black text-white text-xs shadow rounded-lg text-center w-56"
+                placement="top"
+                arrow-class="absolute bg-black w-2 h-2 rotate-45"
+                placement-top-arrow-class="-bottom-1"
+                placement-right-arrow-class="-left-1"
+                placement-bottom-arrow-class="-top-1"
+                placement-left-arrow-class="-right-1"
+                :will-open="willOpen"
+                :will-close="willClose"
+            >
+                <template #trigger="{ open, close }">
+                    <sds-button variant="secondary" type="button" size="sm" @click="" @mouseover="open" @mouseout="close">Export</sds-button>
+                </template>
+                <template #default>
+                    <div class="p-2">
+                        <p>Complete the required Assessment Details fields before exporting data.</p>
+                    </div>
+                </template>
+            </sds-floating-ui>
+            {% endif %}
+        </div>
+    </div>
+    {% endif %}
+
     <div class="card">
         <div class="card-inner" align="center">
             <img src="/static/icons/file-lines-regular.svg">
@@ -526,7 +630,7 @@ DM22-1011
         </div>
     </div>
 
-    <div class="card">
+    <!--<div class="card">
         <div class="card-inner" align="center">
             <img src="/static/icons/file-export-solid.svg">
             <h1>Export All</h1>
@@ -602,7 +706,7 @@ DM22-1011
             </sds-floating-ui>
             {% endif %}
         </div>
-    </div>
+    </div>-->
 
     <div id="risk-chart" style="visibility:hidden;overflow:hidden;height:0;width:0"><apexchart height="400" width="800" :options="riskArgs.options" :series="riskArgs.data"></apexchart></div>
     <div id="nistsp-chart" style="visibility:hidden;overflow:hidden;height:0;width:0"><apexchart height="500" width="800" :options="nistSPArgs.options" :series="nistSPArgs.data"></apexchart></div>
@@ -833,7 +937,10 @@ function pageCreated() {
 
 function pageMethods() {
     functions = {
-        exportAll: function() {
+        sleep(ms) {
+            return new Promise(resolve => setTimeout(resolve,ms))
+        },
+        exportAll: async function() {
             base = String(window.location.origin)
             window.open(base.concat("/ptportal/generate-report"))
             window.open(base.concat("/ptportal/generate-outbrief"))
@@ -845,7 +952,7 @@ function pageMethods() {
             window.open(base.concat("/ptportal/generate-kev-report"))
             window.open(base.concat("/ptportal/download-backup"))
         },
-        exportAllRPT: function() {
+        exportAllRPT: async function() {
             base = String(window.location.origin)
             window.open(base.concat("/ptportal/generate-report"))
             window.open(base.concat("/ptportal/generate-outbrief"))
@@ -856,7 +963,7 @@ function pageMethods() {
             window.open(base.concat("/ptportal/generate-kev-report"))
             window.open(base.concat("/ptportal/download-backup"))
         },
-        exportAllFAST: function() {
+        exportAllFAST: async function() {
             base = String(window.location.origin)
             window.open(base.concat("/ptportal/generate-report"))
             window.open(base.concat("/ptportal/generate-outbrief"))

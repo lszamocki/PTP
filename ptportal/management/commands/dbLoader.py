@@ -27,6 +27,8 @@ from ptportal.models import (
     Tools,
     Report,
     Severities,
+    NarrativeBlock,
+    NarrativeBlockStep,
     NarrativeType,
     Narrative,
     Acronym,
@@ -162,6 +164,62 @@ class Command(BaseCommand):
                 print(e)
                 continue
 
+        narrative_blocks = pd.read_csv('assets/narrative-blocks.csv')
+        blocks_iter = narrative_blocks.iterrows()
+
+        for index, row in blocks_iter:
+            try:
+                narrative_block = NarrativeBlock.objects.create(
+                    name=row['Name']
+                )
+            except Exception as e:
+                print(e)
+                continue
+
+            block_tools = row['Tools'].split(';')
+            block_attack = row['Attack'].split(';')
+            tool_list = []
+            attack_list = []
+
+            for i in block_tools:
+                try:
+                    tool_list.append(Tools.objects.get(name=i))
+                except Exception as e:
+                    print(e)
+                    continue
+
+            try:
+                narrative_block.tools.add(*tool_list)
+            except Exception as e:
+                print(e)
+
+            for i in block_attack:
+                try:
+                    attack_list.append(ATTACK.objects.get(name=i))
+                except Exception as e:
+                    print(e)
+                    continue
+            try:
+                narrative_block.attack.add(*attack_list)
+            except Exception as e:
+                print(e)
+
+        narrative_block_steps = pd.read_csv('assets/narrative-block-steps.csv')
+        block_steps_iter = narrative_block_steps.iterrows()
+
+        for index, row in block_steps_iter:
+            try:
+                NarrativeBlockStep.objects.create(
+                    narrative_block=NarrativeBlock.objects.filter(name=row['Block']).first(),
+                    order=int(row['Order']),
+                    description=row['Description'],
+                    screenshot_help=row['Screenshot Help'],
+                    caption=row['Caption']
+                )
+            except Exception as e:
+                print(e)
+                continue
+
         security_solutions = pd.read_csv('assets/security-solutions.csv')
         solution_iter = security_solutions.iterrows()
 
@@ -175,7 +233,35 @@ class Command(BaseCommand):
             except Exception as e:
                 print(e)
                 continue
+        """
+        mfa_vendors = pd.read_csv('assets/mfa-vendors.csv')
+        mfav_iter = mfa_vendors.iterrows()
 
+        for index, row in mfav_iter:
+            try:
+                MFAVendor.objects.create(
+                    mfa_vendor=row['Vendor'],
+                    used=False,
+                    order=index + 1
+                )
+            except Exception as e:
+                print(e)
+                continue
+
+        mfa_types = pd.read_csv('assets/mfa-types.csv')
+        mfat_iter = mfa_types.iterrows()
+
+        for index, row in mfat_iter:
+            try:
+                MFAType.objects.create(
+                    mfa_type=row['Type'],
+                    used=False,
+                    order=index + 1
+                )
+            except Exception as e:
+                print(e)
+                continue
+        """
         findings_df = pd.read_excel(
             'assets/Penetration Testing Findings Repository 1.0.xlsx',
             sheet_name=["Finding Category", "General Finding", "Specific Finding"],
@@ -261,6 +347,7 @@ class Command(BaseCommand):
                     NIST_800_53=row.NIST_Controls,
                     NIST_CSF=row.NIST_CSF,
                     CIS_CSC=row.CIS_Recommendations,
+                    tags=row.Tags,
                     finding_type='general',
                     category=Category.objects.get(
                         name=(row.Finding_Category_Name).strip()
@@ -362,6 +449,7 @@ class Command(BaseCommand):
                     NIST_800_53=row.NIST_Controls,
                     NIST_CSF=row.NIST_CSF,
                     CIS_CSC=row.CIS_Recommendations,
+                    tags=row.Tags,
                     general_finding=GeneralFinding.objects.get(
                         name=(row.General_Finding_Name.strip())
                     ),

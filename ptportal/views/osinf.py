@@ -28,6 +28,29 @@ class OSINF(generic.base.TemplateView):
         context = {}
         context['emails'] = BreachedEmail.objects.all().order_by('order')
         context['metrics'] = BreachMetrics.objects.all().first()
+
+        missing_metrics = []
+        missing_emails = []
+
+        if BreachMetrics.objects.values_list().count() > 0:
+            if context['metrics'].emails_identified == None:
+                missing_metrics.append("Emails Identified")
+            if context['metrics'].emails_identified_tp == None:
+                missing_metrics.append("Emails Identified in Third-Party Data Breaches")
+            if context['metrics'].creds_identified == None:
+                missing_metrics.append("Credentials Identified")
+            if context['metrics'].creds_identified_unique == None:
+                missing_metrics.append("Unique Users with Identified Credentials")
+            if context['metrics'].creds_validated == None:
+                missing_metrics.append("Credentials Successfully Validated")
+
+        for e in context['emails']:
+            if e.email_address == "" or e.breach_info == "":
+                missing_emails.append(str(e.order))
+
+        context['missing_metrics'] = ', '.join(missing_metrics)
+        context['missing_emails'] = ', '.join(missing_emails)
+        
         return context
 
     def post(self, request, *args, **kwargs):

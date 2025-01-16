@@ -378,12 +378,30 @@ h3 {
 			</div><br><br>
     </div>
     <!-- ARTIFACTS -->
+    <sds-modal size="sm" v-model="overwriteWarning">
+		<template #title>
+			<p>Warning</p>
+		</template>
+		<p class="mb-2">Are you sure you want to overwrite the Artifacts table? All current artifact data will be lost.</p>
+		<div class="flex gap-2">
+			<sds-button variant="primary" @click="this.overwriteWarning=false;parseData(true)">Confirm</sds-button>
+			<sds-button variant="danger" @click="this.overwriteWarning = false">Cancel</sds-button>
+		</div>
+	</sds-modal>
     <div v-show="tabs.artifacts" id="art">
     	<br><br>
     	<div class="mb-8">
-    		<div class="help">Use this form to upload any files that were dropped to disk during testing (e.g., payload testing, phishing campaign, spawning a beacon, etc.) and select 'Save' once the files are uploaded to automatically generate their hashes. Files can also be logged manually by adding new rows and inputting the corresponding hashes (e.g., for files that are too large to upload).</div>
+    		<div class="help">Use this form to record any files that were dropped to disk during testing (e.g., payload testing, phishing campaign, spawning a beacon, etc.). Upload a CSV containing rows to add to the table below or manually add a row for each file and input the corresponding hashes.</div>
     		<br>
-			<sds-file-uploader v-bind="fileUploadArgs" @add="addFile"></sds-file-uploader>
+    		<sds-file-uploader v-model="artifactCSV" v-bind="csvUploadArgs"></sds-file-uploader>
+    		<br>
+    		<div class="grid gap-2 grid-cols-2">
+				<div class="flex gap-2">
+					<sds-button variant="primary" @click="parseData(false)"><img class="w-8 h-8" src="/static/icons/circle-plus-solid-white.svg" style="float:left; padding:0px 6px 0px 0px"> Append</sds-button>
+					<sds-button variant="primary" @click="this.overwriteWarning = true"><img class="w-8 h-8" src="/static/icons/file-circle-xmark-solid.svg" style="float:left; padding:0px 6px 0px 0px"> Overwrite</sds-button>
+				</div>
+			</div>
+			<!--<sds-file-uploader v-bind="fileUploadArgs" @add="addFile"></sds-file-uploader>-->
 			<br><br>
     		<sds-table :fields="fields" :items="items" class="table-prose" v-bind="ArtifactTableArgs">
 				<template #cell(name)="{item}">
@@ -421,12 +439,20 @@ h3 {
 		let pageData = {
 			formData: [],
 			fileList: [],
+			artifactCSV: [],
 			fileUploadArgs: {
 				helperText: "Upload one or more files and select 'Save' to automatically generate their corresponding hashes. Each file should be less than 200 MB.",
 				accept: "",
 				name: "artifactUpload",
 				multiple: true,
 				filesize: 200,
+			},
+			csvUploadArgs: {
+				helperText: "Upload a CSV under 10 MB with the following headers: File,Description,MD5,SHA1,SHA256 and row format: <string>,<string>,<string>,<string>,<string>",
+				accept: ".csv",
+				allowedFiletypes: ["text/csv"],
+				name: "csvUpload",
+				multiple: false
 			},
 			tabs: {
 				infrastructure: true,
@@ -1063,6 +1089,72 @@ h3 {
 				}
 			},
 
+			parseData: async function(overwrite) {
+				if (document.getElementsByName('csvUpload')[0].files.length == 0) {
+					return
+				}
+
+				const fileName = document.getElementsByName('csvUpload')[0].files[0]
+				let artifactString = null
+				await fileName.text().then(text => {artifactString = text})
+
+				var lines = artifactString.split(/[\n\r]+/)
+				var length = lines.length
+				var headers = lines[0].split(',')
+				var findex = headers.indexOf('File')
+				var dindex = headers.indexOf('Description')
+				var mindex = headers.indexOf('MD5')
+				var oindex = headers.indexOf('SHA1')
+				var tindex = headers.indexOf('SHA256')
+
+				var error = false
+				
+				if (findex < 0) {
+					this.displayNotification({title: "Error Parsing Data", text: "The uploaded CSV file appears to be missing a valid 'File' column.", variant: "warning", autoHideDelay:10000})
+					error = true
+				}
+
+				if (dindex < 0) {
+					this.displayNotification({title: "Error Parsing Data", text: "The uploaded CSV file appears to be missing a valid 'Description' column.", variant: "warning", autoHideDelay:10000})
+					error = true
+				}
+
+				if (mindex < 0) {
+					this.displayNotification({title: "Error Parsing Data", text: "The uploaded CSV file appears to be missing a valid 'MD5' column.", variant: "warning", autoHideDelay:10000})
+					error = true
+				}
+
+				if (oindex < 0) {
+					this.displayNotification({title: "Error Parsing Data", text: "The uploaded CSV file appears to be missing a valid 'SHA1' column.", variant: "warning", autoHideDelay:10000})
+					error = true
+				}
+
+				if (tindex < 0) {
+					this.displayNotification({title: "Error Parsing Data", text: "The uploaded CSV file appears to be missing a valid 'SHA256' column.", variant: "warning", autoHideDelay:10000})
+					error = true
+				}
+
+				if (!error) {
+					if (overwrite) {
+						this.ArtifactTableArgs.items = []
+					}
+
+					for (var i = 1; i < length; i++) {
+						values = lines[i].split(',')
+						file = String(values[findex])
+						description = String(values[dindex])
+						md5 = String(values[mindex])
+						sha1 = String(values[oindex])
+						sha256 = String(values[tindex])
+
+						this.ArtifactTableArgs.items.push({id: this.ArtifactTableArgs.items.length + 1, name: file, description: description, md5: md5, sha1: sha1, sha256: sha256, fileOrder: null})
+					}
+
+					this.displayNotification({'title': 'Artifacts Added', text: 'Artifacts have successfully been added to the table. Be sure to save before leaving this page.', variant:"info", autoHideDelay:10000})
+					this.fileList = []
+				}
+			},
+
 			submitTracker: function () {
 
 				this.formData.push({ext_ts: this.ExtTeamserverTableArgs.items})
@@ -1083,10 +1175,10 @@ h3 {
 
 				let num = 0
 
-				for(const file in this.fileList) {
+				/*for(const file in this.fileList) {
 					formData.append('file' + num.toString(), this.fileList[file])
 					num += 1
-				}
+				}*/
 
 				fetch(window.location.href, {
 					method: "POST",

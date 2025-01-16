@@ -56,13 +56,69 @@ DM22-1011
     flex-basis: 300px;
   }
 
+  .warningcard {
+    width: 100%;
+    font-size: 10pt;
+    background-color: #FFE3CB;
+    padding: 15px;
+    border: 2px solid #F79322;
+    text-align: left;
+    overflow: auto;
+  }
+
+  .warningcard img {
+    float: left;
+    padding: 2px;
+  }
+
+  .warningcard p {
+    padding: 0px 30px;
+  }
+
 </style>
 
 {% endblock %}
 
 {% block content %}
 {% csrf_token %}
+
+  {% if unchanged %}
+  <div class="warningcard">
+    <img class="w-8 h-8" src="/static/icons/triangle-exclamation-solid.svg">
+    <p><b>Warning:</b> The following fields have not been modified/tailored: {{unchanged}}</p>
+  </div>
+  <br>
+  {% endif %}
+
+  {% if missing %}
+  <div class="warningcard">
+    <img class="w-8 h-8" src="/static/icons/triangle-exclamation-solid.svg">
+    <p><b>Warning:</b> The following items are missing: {{missing}}</p>
+  </div>
+  <br>
+  {% endif %}
+
 <div class="mt-2 px-2">
+  <sds-modal size="sm" v-model="deleteWarning">
+    <template #title>
+      <p>Warning</p>
+    </template>
+    <p class="mb-2">Are you sure you want to delete [[selectedSystems.length]] selected system(s) from the Affected Systems list? This data will not be recoverable.</p>
+    <div class="flex gap-2">
+      <sds-button variant="primary" @click="this.deleteWarning=false;deleteSelectedSystems()">Confirm</sds-button>
+      <sds-button variant="danger" @click="this.deleteWarning = false">Cancel</sds-button>
+    </div>
+  </sds-modal>
+
+  <sds-modal size="lg" v-model="showNotes">
+  <template #title>
+    <p>Operator Notes</p>
+  </template>
+    <p class="mb-2">
+      <sds-textarea v-model="formData.operatorNotes" :maxlength="10000"></sds-textarea>
+    </p>
+  </sds-modal>
+
   {% if not object %}
   <sds-section v-bind="findingSectionArgs" class="mb-4">
     <template #title>
@@ -78,16 +134,23 @@ DM22-1011
     </template>
     <div class="grid place-items-center">
       <sds-search-box class="w-1/2 place-self-center" :disableSearch="true" variant="primary" placeholder="Search Term" v-model="findingSectionArgs.searchTerm" @update:model-value="filterFindings(findingSectionArgs.searchTerm)"></sds-search-box>
+      <br>
+      <div><div v-if="filters.all" style="float:left; padding:2px">All | </div><div v-else style="float:left; padding:2px"><sds-button style="color:#3C8ABB" @click="filterAll">All</sds-button> | </div><div v-if="filters.general" style="float:left; padding:2px">General Findings | </div><div v-else style="float:left; padding:2px"><sds-button style="color:#3C8ABB" @click="filterGeneral">General Findings</sds-button> | </div><div v-if="filters.specific" style="float:left; padding:2px">Specific Findings | </div><div v-else style="float:left; padding:2px"><sds-button style="color:#3C8ABB" @click="filterSpecific">Specific Findings</sds-button> | </div><div v-if="filters.activeDirectory" style="float:left; padding:2px">Active Directory | </div><div v-else style="float:left; padding:2px"><sds-button style="color:#3C8ABB" @click="filterAD">Active Directory</sds-button> | </div><div v-if="filters.phishing" style="float:left; padding:2px">Phishing | </div><div v-else style="float:left; padding:2px"><sds-button style="color:#3C8ABB" @click="filterPhishing">Phishing</sds-button> | </div><div v-if="filters.mobile" style="float:left; padding:2px">Mobile | </div><div v-else style="float:left; padding:2px"><sds-button style="color:#3C8ABB" @click="filterMobile">Mobile</sds-button> | </div><div v-if="filters.system" style="float:left; padding:2px">System/Service | </div><div v-else style="float:left; padding:2px"><sds-button style="color:#3C8ABB" @click="filterSystem">System/Service</sds-button> | </div><div v-if="filters.webapp" style="float:left; padding:2px">Web Application | </div><div v-else style="float:left; padding:2px"><sds-button style="color:#3C8ABB" @click="filterWebApp">Web Application</sds-button> | </div><div v-if="filters.wireless" style="float:left; padding:2px">Wireless</div><div v-else style="float:left; padding:2px"><sds-button style="color:#3C8ABB" @click="filterWireless">Wireless</sds-button></div></div>
+      <br>
       <sds-scroll-area class="px-4 pt-4 place-self-center h-96 w-11/12">
         <div v-for="finding in findingSectionArgs.findingsSearchList" :key="finding.fields.name" :id="finding.fields.name" class="grid grid-cols-2 border-b border-slate-700 hover:bg-gray-700/[.1]"  @click="selectFinding(finding)" >
           <div class="py-2 px-4">
             <div v-if="finding.fields.finding_type == 'specific'">
-              <div class="font-bold">[[finding.fields.name]]</div>
+              <div v-if="formData.uploaded_findings.includes(finding.fields.name)" class="font-bold">[[finding.fields.name]]*</div>
+              <div v-else class="font-bold">[[finding.fields.name]]</div>
                 <div>[[finding.fields.category]] > [[finding.fields.gen_finding]]</div>
+                <div>Specific Finding</div>
             </div>
             <div v-else>
-              <div class="font-bold">[[finding.fields.name]]</div>
+              <div v-if="formData.uploaded_findings.includes(finding.fields.name)" class="font-bold">[[finding.fields.name]]*</div>
+              <div v-else class="font-bold">[[finding.fields.name]]</div>
                 <div>[[finding.fields.category]]</div>
+                <div>General Finding</div>
             </div>
           </div>
           <div class="py-2">
@@ -95,6 +158,8 @@ DM22-1011
           </div>
         </div>
       </sds-scroll-area>
+      <br>
+      <p class="font-bold">An asterisk (*) indicates that one or more findings with the finding name already exist. Please verify that a duplicate finding is necessary.</p>
     </div>
     <div class="flex flex-row-reverse">
 
@@ -103,7 +168,7 @@ DM22-1011
   {% endif %}
   <sds-section v-bind="findingDetailSectionArgs" class="mb-4">
     <template #title>
-      <span class="font-bold">DETAILS</span>
+      <span class="font-bold">DETAILS <sds-button @click="notesModal()" style="float:right"><img class="w-8 h-8" src="/static/icons/note-sticky-solid.svg"></sds-button></span>
     </template>
     <template #nav>
 
@@ -111,6 +176,15 @@ DM22-1011
     <form id="detailForm">
       <div class="grid grid-cols-6">
         <div class="col-span-5 mb-12">
+          {% if object and report.report_type == 'FAST' %}
+          <div class="mb-4">
+            <h2 class="font-bold">Last Validated</h2>
+            <span class="font-light text-gray-700">When was this finding last validated?</span>
+            <br>
+            <input class="form-control" v-model="formData.lastValidated" type="date" value="formData.lastValidated" style="width:35%; padding:10px">
+          </div>
+          <br>
+          {% endif %}
           <div class="mb-4">
             <h2 class="after:content-['*required'] after:ml-0.5 after:text-red-500 after:font-normal font-bold">Finding Description</h2>
             <span class="font-light text-gray-700">Tailor the text below to clarify the description for this specific case.</span>
@@ -186,10 +260,10 @@ DM22-1011
               </div>
             </div>
             <div>
-              <h2 class="after:content-['*required'] after:ml-0.5 after:text-red-500 after:font-normal font-bold">Mitigation</h2>
-              <span class="font-light text-gray-700">Was this finding fully mitigated within the assessment timeframe?</span>
-              <div v-for="item in findingDetailSectionArgs.mitigationOptions">
-                <input type="radio" v-model="formData.findingMitigation" :id="item.value" :value="item.value">
+              <h2 class="font-bold">Status</h2>
+              <span class="font-light text-gray-700">What is the status of this finding?</span>
+              <div v-for="item in findingDetailSectionArgs.statusOptions">
+                <input type="radio" v-model="formData.findingStatus" :id="item.value" :value="item.value">
                 <label :for="item.value" style="padding:0px 0px 0px 5px">[[item.text]]</label>
               </div>
             </div>
@@ -197,9 +271,40 @@ DM22-1011
           <br>
           <div>
             <h2 class="font-bold">Affected Systems</h2>
-            <span class="font-light text-gray-700">What affected system(s) does this finding relate to?</span>
-            <sds-multiselect class="w-3/5" v-bind="findingDetailSectionArgs.affectedSystemArgs" v-model="findingDetailSectionArgs.affectedSystemArgs.affectedSystem" @update-selected="updateAffectedSystems" @update:model-value="performSearch"></sds-multiselect>
           </div>
+          <br>
+          <sds-file-uploader class="place-self-center w-full" v-bind="affectedSystemUploaderArgs" @add=addSystemFile></sds-file-uploader>
+          <sds-section>
+            <div class="mb-8">
+              <sds-table :fields="fields" :items="items" class="table-prose" v-bind="asTableArgs">
+                  <template #cell(checkbox)="{item}"><div style="padding:12 0"><input type="checkbox" v-model="item.checkbox" :id="item.name" name="affsys" :value="item.name" :checked="false" @click=checkSystem(item.name)></div></template>
+                  <template #cell(name)="{item}">
+                    <sds-input v-model="item.name" placeholder="Affected System" :maxlength="150"></sds-input>
+                  </template>
+                  <template #cell(mitigation)="{item}">
+                        <div class="right-block">
+                          <sds-toggle-switch v-model="item.mitigation"/>
+                        </div>
+                        <div v-if="item.mitigation" class="right-block space">
+                          <p>Mitigated</p>
+                        </div>
+                        <div v-if="!item.mitigation" class="right-block space">
+                          <p>Not Mitigated</p>
+                        </div>
+                  </template>
+                  <template #cell(mitigation_date)="{item}">
+                    <input class="form-control" v-model="item.mitigation_date" type="date" value="item.mitigation_date" :disabled="Boolean(!item.mitigation)">
+                  </template>
+                  <template #cell(delete)="{item}">
+                    <sds-button type="button" @click="deleteSystem(item)" ><img class="w-8 h-8" src="/static/icons/trash-solid.svg"></sds-button>
+                  </template>
+              </sds-table>
+              <sds-button type="button" @click="addSystem"><img class="w-8 h-8" src="/static/icons/plus-solid.svg"></sds-button>
+              <br><br>
+              <div style="padding:8"><input type="checkbox" id="selectAll" :checked="false" @click=selectAll()>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<b>Select All</b></div>
+            </div>
+            <sds-button variant="primary" type="button" @click="setSystemsMitigated()">Set Status: Mitigated</sds-button> <sds-button variant="dark" type="button" @click="setSystemsNotMitigated()">Set Status: Not Mitigated</sds-button> <input class="form-control" v-model="set_mitigation_date" type="date" value="set_mitigation_date" style="width:140px"> <sds-button class="btn btn-info" type="button" @click="setSystemsDate()">Set Date Mitigated</sds-button> <sds-button variant="danger" type="button" @click="this.deleteWarning = true"><img class="w-8 h-8" src="/static/icons/trash-solid-white.svg" style="float:left; padding:3px 6px 0px 0px"> Delete</sds-button>
+          </sds-section>
         </div>
 
       </div>
@@ -232,7 +337,7 @@ DM22-1011
           <sds-button @click="screenshotModal(screenshot)"><img :src="[[screenshot.imgURL]]"></sds-button>
           <div style="float:left; padding:19px 15px 0px 10px; cursor:pointer"><div style="width:15px; height:2px; background-color:gray; margin:2px 0;"></div><div style="width:15px; height:2px; background-color:gray; margin:2px 0;"></div></div><div class="delete" style="float:right; padding:0px 8px 0px 0px; font-size:20pt"><sds-button @click="deleteFile(screenshot)">&#10799;</sds-button></div>
           <br>
-          <sds-textarea v-model="screenshot.caption" :rows="1" placeholder="Caption" :maxlength="250"></sds-textarea>
+          <sds-input v-model="screenshot.caption" placeholder="Caption" :maxlength="250"></sds-input>
         </div>
       </ul>
     </div>
@@ -258,7 +363,7 @@ DM22-1011
         </sds-scroll-area>
     </div>
     <br>
-    <sds-button class="float-right" variant="primary" @click="submitFinding"><img class="w-8 h-8" src="/static/icons/floppy-disk-solid.svg" style="float:left; padding:0px 6px 0px 0px"> Save</sds-button>
+    <div v-if="save"><sds-button class="float-right" variant="primary" @click="submitFinding"><img class="w-8 h-8" src="/static/icons/floppy-disk-solid.svg" style="float:left; padding:0px 6px 0px 0px"> Save</sds-button></div><div v-else><sds-button class="float-right" variant="primary" :disabled=1><img class="w-8 h-8" src="/static/icons/floppy-disk-solid.svg" style="float:left; padding:0px 6px 0px 0px"> Save</sds-button></div>
     <br><br>
   </sds-section>
 </div>
@@ -270,18 +375,66 @@ function pageData() {
   let pageData = {
     formData: {
       selectedFinding: null,
+      lastValidated: "{{ object.last_validated | date:"Y-m-d" }}",
       findingDescription: "{{ object.description | escapejs }}",
       findingRemediation: "{{ object.remediation | escapejs }}",
+      operatorNotes: "{{ object.operator_notes | escapejs }}",
       originalDescription: "{{ object.finding.description | escapejs }}",
       originalRemediation: "{{ object.finding.remediation | escapejs }}",
       findingSeverity: "{{ object.severity.severity_name }}",
       assessmentType: "{{ object.assessment_type }}",
-      findingMitigation: "{{ object.mitigation }}",
-      affectedSystemList: "",
+      findingStatus: "{{ object.status }}",
       screenshotDescription: "{{ object.screenshot_description | escapejs }}",
+      uploaded_findings: "{{ uploaded_findings | escapejs }}",
       kevs: [],
       screenshots: [],
     },
+    deleteWarning: false,
+    set_mitigation_date: '2000-01-01',
+    asTableArgs: {
+      fields: [
+        {
+          key: "uid",
+          hidden: true
+        },
+        {
+          key: "checkbox",
+        },
+        {
+          key: "name",
+          label: "Affected System",
+          sortable: true
+        },
+        {
+          key: "mitigation",
+          label: "Mitigation Status",
+          sortable: true
+        },
+        {
+          key: "mitigation_date",
+          label: "Date Mitigated",
+          sortable: true
+        },
+        {
+          key: "delete",
+        }
+      ],
+      items: []
+    },
+    selectedSystems: [],
+    save: true,
+    filters: {
+      all: true,
+      general: false,
+      specific: false,
+      activeDirectory: false,
+      phishing: false,
+      mobile: false,
+      system: false,
+      webapp: false,
+      wireless: false
+    },
+    showNotes: false,
     screenshotPreview: false,
     screenshotURL: null,
     fileList: [],
@@ -297,9 +450,16 @@ function pageData() {
       fileUploaderArgs: {
         accept: ".jpg, .jpeg, .png",
         allowedFiletypes: ["image/jpg", "image/jpeg", "image/JPG", "image/JPEG", "image/png", "image/PNG"],
-        helperText: "Upload a JPG, JPEG, or PNG under 10MB.",
+        helperText: "Upload a JPG, JPEG, or PNG under 10 MB.",
         multiple: true
       }
+    },
+    affectedSystemUploaderArgs: {
+      accept: ".txt",
+      allowedFiletypes: ["text/plain"],
+      helperText: "Load affected systems via a TXT file (under 10 MB) containing a comma or newline delimited list of systems.",
+      multiple: false,
+      name: "systemUpload"
     },
     over: {},
     startLoc: 0,
@@ -358,21 +518,16 @@ function pageData() {
       assessmentTypeOptions: [
         {
           id: 1,
-          value: "External/Internal",
-          text: "External/Internal"
-        },
-        {
-          id: 2,
           value: "External",
           text: "External"
         },
         {
-          id: 3,
+          id: 2,
           value: "Internal",
           text: "Internal"
         },
         {
-          id: 4,
+          id: 3,
           value: "Phishing",
           text: "Phishing"
         }
@@ -387,6 +542,23 @@ function pageData() {
           id: 2,
           value: "False",
           text: "No"
+        }
+      ],
+      statusOptions: [
+        {
+          id: 1,
+          value: "Draft",
+          text: "Draft"
+        },
+        {
+          id: 2,
+          value: "Needs Review",
+          text: "Needs Review"
+        },
+        {
+          id: 3,
+          value: "Complete",
+          text: "Complete"
         }
       ]
     },
@@ -410,7 +582,7 @@ function pageData() {
 
       return kev_list;
     },
-    affectedSystemsData: function() {
+    affectedSystemData: function() {
       var as_list = [];
       var systems = {{ affected_systems | safe }};
       for (i = 0; i < systems.length; i++) {
@@ -427,24 +599,25 @@ function pageData() {
     },
   }
 
+  today = new Date()
+  pageData.set_mitigation_date = today.toISOString().split('T')[0]
+
   pageData.findingSectionArgs.findingsSearchList = pageData.findingData().filter(finding => finding)
   pageData.kevSectionArgs.kevSearchList = pageData.kevData().filter(kev => kev)
-  pageData.findingDetailSectionArgs.affectedSystemArgs.options = pageData.affectedSystemsData().filter(system => system)
+  pageData.findingDetailSectionArgs.affectedSystemArgs.options = pageData.affectedSystemData().filter(system => system)
+  
 
   {% if object %}
     pageData.formData.selectedFinding = "{{ object }}"
-    systems = []
-    index = pageData.findingDetailSectionArgs.affectedSystemArgs.options.length
 
-    {% for s in object.affected_systems.all %}
-      sys = {key: index, value: "{{s.name}}", isNewTag: false}
-      proxy = new Proxy(sys, {})
-      systems.push(proxy)
-      index++
+    {% for s in mitigation %}
+      {% if s.mitigation|yesno:"true,false" == "false" %}
+        mit = false
+      {% else %}
+        mit = true
+      {% endif %}
+      pageData.asTableArgs.items.push({uid: "{{s.system.uid}}", name: "{{s.system.name}}", mitigation: mit, mitigation_date: "{{s.mitigation_date | date:"Y-m-d"}}"})
     {% endfor %}
-
-    pageData.findingDetailSectionArgs.affectedSystemArgs.selected = systems
-    pageData.formData.affectedSystemList = systems
 
     {% for screenshot in screenshots %}
       imgURL = window.location.origin + "/media/" + "{{screenshot.file}}"
@@ -476,27 +649,38 @@ function pageMethods() {
       this.screenshotURL = screenshot['imgURL']
       this.screenshotPreview = true
     },
+    notesModal: function () {
+      this.showNotes = true
+    },
     selectFinding: function(finding){
       if (this.formData.selectedFinding == null) {
         this.formData.selectedFinding = finding
         element = document.getElementById(finding.fields.name)
-
-        element.classList.remove("hover:bg-gray-700/[.1]")
-        element.classList.add("bg-blue-300")
-        element.classList.add("hover:bg-blue-200")
+        try {
+          element.classList.remove("hover:bg-gray-700/[.1]")
+        } catch (error) {}
+        try {
+          element.classList.add("bg-blue-300")
+          element.classList.add("hover:bg-blue-200")
+        } catch (error) {}
 
         this.formData.findingDescription = this.formData.selectedFinding.fields.description
         this.formData.findingRemediation = this.formData.selectedFinding.fields.remediation
         this.formData.originalDescription = this.formData.selectedFinding.fields.description
         this.formData.originalRemediation = this.formData.selectedFinding.fields.remediation
+        this.formData.findingStatus = "Draft"
         this.formData.findingSeverity = this.formData.selectedFinding.fields.severity
       }
       else if (this.formData.selectedFinding == finding) {
         this.formData.selectedFinding = null
         element = document.getElementById(finding.fields.name)
-        element.classList.remove("bg-blue-300")
-        element.classList.remove("hover:bg-blue-200")
-        element.classList.add("hover:bg-gray-700/[.1]")
+        try {
+          element.classList.remove("bg-blue-300")
+          element.classList.remove("hover:bg-blue-200")
+        } catch (error) {}
+        try {
+          element.classList.add("hover:bg-gray-700/[.1]")
+        } catch (error) {}
 
         this.formData.findingDescription = null
         this.formData.findingRemediation = null
@@ -508,12 +692,16 @@ function pageMethods() {
         oldElement = document.getElementById(this.formData.selectedFinding.fields.name)
         newElement = document.getElementById(finding.fields.name)
         this.formData.selectedFinding = finding
-        oldElement.classList.remove("bg-blue-300")
-        oldElement.classList.remove("hover:bg-blue-200")
-        oldElement.classList.add("hover:bg-gray-700/[.1]")
-        newElement.classList.remove("hover:bg-gray-700/[.1]")
-        newElement.classList.add("bg-blue-300")
-        newElement.classList.add("hover:bg-blue-200")
+        try {
+          oldElement.classList.remove("bg-blue-300")
+          oldElement.classList.remove("hover:bg-blue-200")
+          oldElement.classList.add("hover:bg-gray-700/[.1]")
+        } catch (error) {}
+        try {
+          newElement.classList.remove("hover:bg-gray-700/[.1]")
+          newElement.classList.add("bg-blue-300")
+          newElement.classList.add("hover:bg-blue-200")
+        } catch (error) {}
 
         this.formData.findingDescription = this.formData.selectedFinding.fields.description
         this.formData.findingRemediation = this.formData.selectedFinding.fields.remediation
@@ -522,12 +710,105 @@ function pageMethods() {
         this.formData.findingSeverity = this.formData.selectedFinding.fields.severity
       }
     },
+    addSystem: async function () {
+      this.asTableArgs.items.push({uid: null, name: "", mitigation: false, mitigation_date: null})
+    },
+    deleteSystem: function(item) {
+      this.asTableArgs.items.splice(this.asTableArgs.items.indexOf(item), 1)
+    },
+    checkSystem: function(system) {
+      if (document.getElementById(system).checked) {
+        this.selectedSystems.push(system)
+      }
+
+      else {
+        index = this.selectedSystems.indexOf(system)
+        this.selectedSystems.splice(index, 1)
+      }
+    },
+    selectAll: function() {
+      if (document.getElementById("selectAll").checked) {
+        for (let i = 0; i < this.asTableArgs.items.length; i++) {
+          system=this.asTableArgs.items[i].name
+          this.selectedSystems.push(system)
+          document.getElementById(system).checked = true
+        }
+      }
+
+      else {
+        for (let i = 0; i < this.selectedSystems.length; i++) {
+          document.getElementById(this.selectedSystems[i]).checked = false
+        }
+        this.selectedSystems = []
+      }
+    },
+    setSystemsMitigated: function() {
+      if(this.selectedSystems.length == 0) {
+        return;
+      }
+
+      for (let i = 0; i < this.selectedSystems.length; i++) {
+        index = this.asTableArgs.items.findIndex(item => item.name === this.selectedSystems[i])
+        this.asTableArgs.items[index].mitigation = true
+      }
+    },
+    setSystemsNotMitigated: function() {
+      if (this.selectedSystems.length == 0) {
+        return;
+      }
+
+      for (let i = 0; i < this.selectedSystems.length; i++) {
+        index = this.asTableArgs.items.findIndex(item => item.name === this.selectedSystems[i])
+        this.asTableArgs.items[index].mitigation = false
+      }
+    },
+    setSystemsDate: function() {
+      if (this.selectedSystems.length == 0) {
+        return;
+      }
+
+      for (let i = 0; i < this.selectedSystems.length; i++) {
+        index = this.asTableArgs.items.findIndex(item => item.name === this.selectedSystems[i])
+        if (this.asTableArgs.items[index].mitigation == true) {
+          this.asTableArgs.items[index].mitigation_date = this.set_mitigation_date
+        }
+      }
+    },
+    deleteSelectedSystems: function() {
+      if (this.selectedSystems.length == 0) {
+        return;
+      }
+
+      for (let i = 0; i < this.selectedSystems.length; i++) {
+        index = this.asTableArgs.items.findIndex(item => item.name === this.selectedSystems[i])
+        this.asTableArgs.items.splice(index, 1)
+      }
+      document.getElementById("selectAll").checked = false
+    },
+    addSystemFile: async function (event) {
+      const fileName = document.getElementsByName('systemUpload')[0].files[0]
+      let sysString = null
+      await fileName.text().then(text => {sysString = text})
+      var systems = sysString.split(', ').join(',').split('\r').join(',').split('\n').join(',').split(',')
+      systems = systems.filter(item => item)
+
+      for (let i = 0; i < systems.length; i++) {
+        index = this.asTableArgs.items.findIndex(item => item.name === systems[i])
+        if (index == -1) {
+          this.asTableArgs.items.push({uid: null, name: systems[i], mitigation: false, mitigation_date: null})
+        }
+
+        else {
+          this.displayNotification({title: "System Not Added", text: "The system '" + systems[i] + "' already exists and was not added to the Affected Systems table.", variant: "warning", autoHideDelay:10000})
+        }
+      }
+    },
     addFile: function (event) {
       const files = Array.from(event.files)
       newFiles = files.filter(file => !this.fileList.includes(file))
       imgOrder = this.fileList.length
       Array.prototype.push.apply(this.fileList, newFiles)
-      for(let file in newFiles) {
+      for (let file in newFiles) {
         this.formData.screenshots.push({order: this.formData.screenshots.length + 1, imgOrder: imgOrder, uuid: null, imgURL: URL.createObjectURL(newFiles[file]), caption: ""})
         imgOrder++
       }
@@ -535,7 +816,7 @@ function pageMethods() {
     },
     deleteFile: function (screenshot) {
       index = this.formData.screenshots.indexOf(screenshot.file)
-      if(index != -1){
+      if (index != -1) {
         this.formData.screenshots.splice(index, 1)
         URL.revokeObjectURL(this.formData.screenshots.imgURL)
       }
@@ -577,28 +858,38 @@ function pageMethods() {
     },
     submitFinding: function () {
 
+      this.save = false
+      
+      duplicateSystem = this.asTableArgs.items.find((item, index) => { return this.asTableArgs.items.find((x, i) => x.name === item.name && index !== i)})
+
       if (this.formData.selectedFinding == null) {
         this.displayNotification({'title': 'Save Error', text: 'A valid finding must be selected from the list before saving.', variant:'danger'})
+        this.save = true
       }
 
       else if (this.formData.findingDescription == null || this.formData.findingDescription == "") {
         this.displayNotification({'title': 'Save Error', text: 'A finding description must be entered before saving.', variant:'danger'})
+        this.save = true
       }
 
       else if (this.formData.findingRemediation == null || this.formData.findingRemediation == "") {
         this.displayNotification({'title': 'Save Error', text: 'A remediation description must be entered before saving.', variant:'danger'})
+        this.save = true
       }
 
       else if (this.formData.findingSeverity == null || this.formData.findingSeverity == "") {
         this.displayNotification({'title': 'Save Error', text: 'A valid finding severity must be selected before saving.', variant:'danger'})
+        this.save = true
       }
 
       else if (this.formData.assessmentType == null || this.formData.assessmentType == "") {
         this.displayNotification({'title': 'Save Error', text: 'A valid assessment type must be selected before saving.', variant:'danger'})
+        this.save = true
       }
 
-      else if (this.formData.findingMitigation == null || this.formData.findingMitigation == "") {
-        this.displayNotification({'title': 'Save Error', text: 'A valid mitigation status must be selected before saving.', variant:'danger'})
+      else if (duplicateSystem) {
+        this.displayNotification({'title': 'Save Error', text: 'Remove duplicate instances of the following affected system: ' + duplicateSystem.name, variant:'danger'})
+        this.save = true
       }
 
       else {
@@ -612,6 +903,8 @@ function pageMethods() {
           num += 1
         }
 
+        formData.append('systems', JSON.stringify(this.asTableArgs.items))
+
         fetch(window.location.href, {
           method: "POST",
           body: formData,
@@ -623,15 +916,17 @@ function pageMethods() {
             setTimeout(() => {this.redirectLink("{% url 'index' %}")}, 2000)
           }
           else {
-            this.displayNotification({title: "Error Saving Data", text: "Bad response received from server. Check for errors in form and try again.", variant: "danger"})
+            this.displayNotification({'title': "Error Saving Data", text: "Bad response received from server. Check for errors in form and try again.", variant: "danger"})
+            this.save = true
           }
         }).catch(error => {
           this.displayNotification({'title': 'Error Saving Data', variant:'danger'})
+          this.save = true
         })
       }
     },
     filterFindings: function(searchTerm) {
-      this.findingSectionArgs.findingsSearchList = this.findingData().filter(finding => finding.fields.name.toLowerCase().includes(searchTerm.toLowerCase()) || finding.fields.name.toLowerCase().includes(searchTerm.toLowerCase()) || finding.fields.gen_finding.toLowerCase().includes(searchTerm.toLowerCase()) || finding.fields.description.toLowerCase().includes(searchTerm.toLowerCase()))
+      this.findingSectionArgs.findingsSearchList = this.findingData().filter(finding => finding.fields.name.toLowerCase().includes(searchTerm.toLowerCase()) || finding.fields.gen_finding.toLowerCase().includes(searchTerm.toLowerCase()) || finding.fields.description.toLowerCase().includes(searchTerm.toLowerCase()) || finding.fields.tags.toLowerCase().includes(searchTerm.toLowerCase()))
 
       setTimeout(() => {
         if(this.formData.selectedFinding != null){
@@ -644,6 +939,222 @@ function pageMethods() {
         }
       }, "50")
 
+    },
+    filterAll: function() {
+      this.filters.all = true
+      this.filters.general = false
+      this.filters.specific = false
+      this.filters.activeDirectory= false
+      this.filters.phishing = false
+      this.filters.mobile = false
+      this.filters.system = false
+      this.filters.webapp = false
+      this.filters.wireless = false
+
+      this.findingSectionArgs.findingsSearchList = this.findingData().filter(finding => finding.fields.finding_type.toLowerCase() == "general" || finding.fields.finding_type.toLowerCase() == "specific")
+
+      setTimeout(() => {
+        if(this.formData.selectedFinding != null){
+          element = document.getElementById(this.formData.selectedFinding.fields.name)
+          if(element != null){
+            element.classList.remove("hover:bg-gray-700/[.1]")
+            element.classList.add("bg-blue-300")
+            element.classList.add("hover:bg-blue-200")
+          }
+        }
+      }, "50")
+    },
+    filterGeneral: function() {
+      this.filters.all = false
+      this.filters.general = true
+      this.filters.specific = false
+      this.filters.activeDirectory= false
+      this.filters.phishing = false
+      this.filters.mobile = false
+      this.filters.system = false
+      this.filters.webapp = false
+      this.filters.wireless = false
+
+      this.findingSectionArgs.findingsSearchList = this.findingData().filter(finding => finding.fields.finding_type.toLowerCase() == "general")
+
+      setTimeout(() => {
+        if(this.formData.selectedFinding != null){
+          element = document.getElementById(this.formData.selectedFinding.fields.name)
+          if(element != null){
+            element.classList.remove("hover:bg-gray-700/[.1]")
+            element.classList.add("bg-blue-300")
+            element.classList.add("hover:bg-blue-200")
+          }
+        }
+      }, "50")
+    },
+    filterSpecific: function() {
+      this.filters.all = false
+      this.filters.general = false
+      this.filters.specific = true
+      this.filters.activeDirectory= false
+      this.filters.phishing = false
+      this.filters.mobile = false
+      this.filters.system = false
+      this.filters.webapp = false
+      this.filters.wireless = false
+
+      this.findingSectionArgs.findingsSearchList = this.findingData().filter(finding => finding.fields.finding_type.toLowerCase() == "specific")
+
+      setTimeout(() => {
+        if(this.formData.selectedFinding != null){
+          element = document.getElementById(this.formData.selectedFinding.fields.name)
+          if(element != null){
+            element.classList.remove("hover:bg-gray-700/[.1]")
+            element.classList.add("bg-blue-300")
+            element.classList.add("hover:bg-blue-200")
+          }
+        }
+      }, "50")
+    },
+    filterAD: function() {
+      this.filters.all = false
+      this.filters.general = false
+      this.filters.specific = false
+      this.filters.activeDirectory= true
+      this.filters.phishing = false
+      this.filters.mobile = false
+      this.filters.system = false
+      this.filters.webapp = false
+      this.filters.wireless = false
+
+      this.findingSectionArgs.findingsSearchList = this.findingData().filter(finding => finding.fields.category.toLowerCase() == "active directory weakness")
+
+      setTimeout(() => {
+        if(this.formData.selectedFinding != null){
+          element = document.getElementById(this.formData.selectedFinding.fields.name)
+          if(element != null){
+            element.classList.remove("hover:bg-gray-700/[.1]")
+            element.classList.add("bg-blue-300")
+            element.classList.add("hover:bg-blue-200")
+          }
+        }
+      }, "50")
+    },
+    filterPhishing: function() {
+      this.filters.all = false
+      this.filters.general = false
+      this.filters.specific = false
+      this.filters.activeDirectory= false
+      this.filters.phishing = true
+      this.filters.mobile = false
+      this.filters.system = false
+      this.filters.webapp = false
+      this.filters.wireless = false
+
+      this.findingSectionArgs.findingsSearchList = this.findingData().filter(finding => finding.fields.category.toLowerCase() == "phishing weakness")
+
+      setTimeout(() => {
+        if(this.formData.selectedFinding != null){
+          element = document.getElementById(this.formData.selectedFinding.fields.name)
+          if(element != null){
+            element.classList.remove("hover:bg-gray-700/[.1]")
+            element.classList.add("bg-blue-300")
+            element.classList.add("hover:bg-blue-200")
+          }
+        }
+      }, "50")
+    },
+    filterMobile: function() {
+      this.filters.all = false
+      this.filters.general = false
+      this.filters.specific = false
+      this.filters.activeDirectory= false
+      this.filters.phishing = false
+      this.filters.mobile = true
+      this.filters.system = false
+      this.filters.webapp = false
+      this.filters.wireless = false
+
+      this.findingSectionArgs.findingsSearchList = this.findingData().filter(finding => finding.fields.category.toLowerCase() == "mobile technology weakness")
+
+      setTimeout(() => {
+        if(this.formData.selectedFinding != null){
+          element = document.getElementById(this.formData.selectedFinding.fields.name)
+          if(element != null){
+            element.classList.remove("hover:bg-gray-700/[.1]")
+            element.classList.add("bg-blue-300")
+            element.classList.add("hover:bg-blue-200")
+          }
+        }
+      }, "50")
+    },
+    filterSystem: function() {
+      this.filters.all = false
+      this.filters.general = false
+      this.filters.specific = false
+      this.filters.activeDirectory= false
+      this.filters.phishing = false
+      this.filters.mobile = false
+      this.filters.system = true
+      this.filters.webapp = false
+      this.filters.wireless = false
+
+      this.findingSectionArgs.findingsSearchList = this.findingData().filter(finding => finding.fields.category.toLowerCase() == "system or service weakness")
+
+      setTimeout(() => {
+        if(this.formData.selectedFinding != null){
+          element = document.getElementById(this.formData.selectedFinding.fields.name)
+          if(element != null){
+            element.classList.remove("hover:bg-gray-700/[.1]")
+            element.classList.add("bg-blue-300")
+            element.classList.add("hover:bg-blue-200")
+          }
+        }
+      }, "50")
+    },
+    filterWebApp: function() {
+      this.filters.all = false
+      this.filters.general = false
+      this.filters.specific = false
+      this.filters.activeDirectory= false
+      this.filters.phishing = false
+      this.filters.mobile = false
+      this.filters.system = false
+      this.filters.webapp = true
+      this.filters.wireless = false
+
+      this.findingSectionArgs.findingsSearchList = this.findingData().filter(finding => finding.fields.category.toLowerCase() == "web application weakness")
+
+      setTimeout(() => {
+        if(this.formData.selectedFinding != null){
+          element = document.getElementById(this.formData.selectedFinding.fields.name)
+          if(element != null){
+            element.classList.remove("hover:bg-gray-700/[.1]")
+            element.classList.add("bg-blue-300")
+            element.classList.add("hover:bg-blue-200")
+          }
+        }
+      }, "50")
+    },
+    filterWireless: function() {
+      this.filters.all = false
+      this.filters.general = false
+      this.filters.specific = false
+      this.filters.activeDirectory= false
+      this.filters.phishing = false
+      this.filters.mobile = false
+      this.filters.system = false
+      this.filters.webapp = false
+      this.filters.wireless = true
+
+      this.findingSectionArgs.findingsSearchList = this.findingData().filter(finding => finding.fields.category.toLowerCase() == "wireless technology weakness")
+
+      setTimeout(() => {
+        if(this.formData.selectedFinding != null){
+          element = document.getElementById(this.formData.selectedFinding.fields.name)
+          if(element != null){
+            element.classList.remove("hover:bg-gray-700/[.1]")
+            element.classList.add("bg-blue-300")
+            element.classList.add("hover:bg-blue-200")
+          }
+        }
+      }, "50")
     },
     checkKEV: function(kev) {
       if (document.getElementById(kev).checked) {
@@ -658,12 +1169,8 @@ function pageMethods() {
     filterKEVs: function(searchTerm) {
       this.kevSectionArgs.kevSearchList = this.kevData().filter(kev => kev.fields.vulnerability_name.toLowerCase().includes(searchTerm.toLowerCase()) || kev.fields.cve_id.toLowerCase().includes(searchTerm.toLowerCase()) || kev.fields.description.toLowerCase().includes(searchTerm.toLowerCase()) || kev.fields.vendor_project.toLowerCase().includes(searchTerm.toLowerCase()) || kev.fields.product.toLowerCase().includes(searchTerm.toLowerCase()))
     },
-    updateAffectedSystems: function(selections) {
-      this.findingDetailSectionArgs.affectedSystemArgs.selected = selections
-      this.formData.affectedSystemList = selections
-    },
     performSearch: function(value){
-      this.findingDetailSectionArgs.affectedSystemArgs.options = this.affectedSystemsData().filter(sys => sys.value.toLowerCase().includes(value.toLowerCase()))
+      this.findingDetailSectionArgs.affectedSystemArgs.options = this.affectedSystemData().filter(sys => sys.value.toLowerCase().includes(value.toLowerCase()))
     }
   }
   return pageFunctions

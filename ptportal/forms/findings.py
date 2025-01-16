@@ -39,9 +39,6 @@ class UploadedFindingForm(BaseModelForm):
         self.fields['assessment_type'].widget.attrs.update(
             {'class': 'form-control', 'required': True}
         )
-        self.fields['mitigation'].widget.attrs.update(
-            {'class': 'form-control', 'required': True}
-        )
         self.fields['screenshot_description'].widget.attrs.update(
             {'class': 'form-control', 'rows': 5, 'required': False, 'tabIndex': '-1'}
         )
@@ -70,9 +67,6 @@ class UploadedFindingForm(BaseModelForm):
             'assessment_type': forms.RadioSelect(
                 {'class': 'form-check-input', 'required': True}
             ),
-            'mitigation': forms.RadioSelect(
-                {'class': 'form-check-input', 'required': True}
-            ),
         }
 
 
@@ -93,9 +87,6 @@ class EditUploadedFindingForm(BaseModelForm):
         self.fields['assessment_type'].widget.attrs.update(
             {'class': 'form-control', 'required': True}
         )
-        self.fields['mitigation'].widget.attrs.update(
-            {'class': 'form-control', 'required': True}
-        )
 
     class Meta:
         model = UploadedFinding
@@ -109,9 +100,6 @@ class EditUploadedFindingForm(BaseModelForm):
                 {'class': 'form-check-input', 'required': True}
             ),
             'assessment_type': forms.RadioSelect(
-                {'class': 'form-check-input', 'required': True}
-            ),
-            'mitigation': forms.RadioSelect(
                 {'class': 'form-check-input', 'required': True}
             ),
         }

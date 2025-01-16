@@ -76,11 +76,45 @@ DM22-1011
 	border-bottom-left-radius: 0;
 }
 
+.warningcard {
+	width: 100%;
+	font-size: 10pt;
+	background-color: #FFE3CB;
+	padding: 15px;
+	border: 2px solid #F79322;
+	text-align: left;
+	overflow: auto;
+   }
+.warningcard img {
+	float: left;
+	padding: 2px;
+}
+.warningcard p {
+	padding: 0px 30px;
+}
+
 </style>
 {% endblock %}
 
 {% block content %}
 {% csrf_token %}
+
+{% if missing_magnitude %}
+	<div class="warningcard">
+		<img class="w-8 h-8" src="/static/icons/triangle-exclamation-solid.svg">
+		<p><b>Warning:</b> The following findings are missing a magnitude value: {{missing_magnitude}}</p>
+	</div>
+	<br>
+{% endif %}
+
+{% if missing_likelihood %}
+	<div class="warningcard">
+		<img class="w-8 h-8" src="/static/icons/triangle-exclamation-solid.svg">
+		<p><b>Warning:</b> The following findings are missing a likelihood value: {{missing_likelihood}}</p>
+	</div>
+	<br>
+{% endif %}
+
 <sds-section>
 	<div class="collapse-section">
 		<input id="collapse" class="toggle" type="checkbox">
@@ -88,7 +122,7 @@ DM22-1011
 		<div class="collapse-content">
 			<div class="content">
 				<br>
-				<p><b>Severity: </b>The severity of a finding correlates to how easily a finding can be leveraged and how high the impact would be, if the finding were abused. This element can be set while creating/editing a finding and this page will be updated to reflect the severity.</p>
+				<p><b>Severity: </b>The severity of a finding correlates to how easily a finding can be leveraged and how high the impact would be, if the finding were abused. If there is a CVSS score for a vulnerability related to the finding, it should be used to guide the severity selection. This element can be set while creating/editing a finding and this page will be updated to reflect the severity.</p>
 				<br>
 				<p><b>Magnitude: </b>The magnitude of a finding is the number of occurrences of the finding within the target environment. Often, this refers to the number of affected systems. In cases where a group of domain objects is affected (e.g., 'Domain Users'), the magnitude should reflect the total number of affected objects (e.g., number of users in the 'Domain Users' group).</p>
 				<br>
@@ -96,9 +130,11 @@ DM22-1011
 				<br>
 				<p><b>KEV: </b>If a finding has one or more KEVs mapped to it, it will be tagged as a KEV and the likelihood will automatically be set to 100%. This element can be set while creating/editing a finding by selecting relevant KEVs and this page will be updated to reflect the KEV status.</p>
 				<br>
-				<p><b>Mitigation Status: </b>If a finding was mitigated within the assessment timeframe, it will be deducted from the total risk score to calculate the mitigated risk score. This element can be set while creating/editing a finding and this page will be updated to reflect the mitigation status.</p>
+				<!--<p><b>Mitigation Status: </b>If a finding was mitigated within the assessment timeframe, it will be deducted from the total risk score to calculate the mitigated risk score. This element can be set while creating/editing a finding and this page will be updated to reflect the mitigation status.</p>
+				<br>-->
+				<p><b>Risk Score: </b>The risk score of each finding is calculated based on the values associated with Severity, Magnitude, and Likelihood prior to mitigations. This score can be used to track an organization's risk over time and compare risk across organizations and sectors.</p>
 				<br>
-				<p><b>Risk Score: </b>The risk score of each finding is calculated based on the values associated with Severity, Magnitude, and Likelihood. This score can be used to track an organization's risk over time and compare risk across organizations and sectors.</p>
+				<p><b>Mitigated Risk Score: </b>If a finding's affected systems are mitigated within the assessment timeframe, the mitigated risk score of each finding is calculated based on unmitigated risk proportional to the percentage of affected systems that remain unmitigated. This can also be viewed as the updated risk score reflecting the deduction of mitigated risk.</p>
 				<br>
 			</div>
 		</div>
@@ -107,8 +143,8 @@ DM22-1011
 	</p>
 	<br><br>
 	<sds-table class="table-prose mb-2" v-bind="scoreTableArgs">
-		<template #cell(id)="{item}"></template>
-		<template #cell(finding)="{item}"></template>
+		<template #cell(order)="{item}"></template>
+		<template #cell(uploaded_finding_name)="{item}"></template>
 		<template #cell(severity)="{item}"></template>
 		<template #cell(magnitude)="{item}">
 			<sds-select v-model="item.magnitude" :options="magnitude_options"/>
@@ -124,10 +160,8 @@ DM22-1011
 		<template #cell(kev)="{item}">
 			<sds-toggle-switch v-model="item.kev" :disabled="Boolean(1)"/>
 		</template>
-		<template #cell(mitigation)="{item}">
-			<sds-toggle-switch v-model="item.mitigation" :disabled="Boolean(1)"/>
-		</template>
-		<template #cell(score)="{item}"></template>
+		<template #cell(risk_score)="{item}"></template>
+		<template #cell(mitigated_score)="{item}"></template>
 	</sds-table>
 
 	<div style="width:25%; margin-left: auto; margin-right: 0;">
@@ -151,7 +185,7 @@ DM22-1011
 			scoreTableArgs: {
 				fields: [
 					{
-						key: "uploaded_finding_id",
+						key: "order",
 						label: "#",
 						sortable: true
 					},
@@ -181,13 +215,13 @@ DM22-1011
 						sortable: true
 					},
 					{
-						key: "mitigation",
-						label: "Mitigation Status",
+						key: "risk_score",
+						label: "Risk Score",
 						sortable: true
 					},
 					{
-						key: "risk_score",
-						label: "Risk Score",
+						key: "mitigated_score",
+						label: "Mitigated Risk Score",
 						sortable: true
 					}
 				],
@@ -203,22 +237,23 @@ DM22-1011
 					},
 					{
 						key: "mitigated",
-						label: "Mitigated Risk Score",
+						label: "Total Mitigated Risk Score",
 						sortable: false
 					}
 				],
 				items: []
 			},
 			magnitude_options: [
-				{ id: 1, value: '1-10', text: '1-10'},
-				{ id: 2, value: '11-20', text: '11-20'},
-				{ id: 3, value: '21-30', text: '21-30'},
-				{ id: 4, value: '31+', text: '31+'},
+				{ id: 1, value: '1-10', text: '1-10' },
+				{ id: 2, value: '11-20', text: '11-20' },
+				{ id: 3, value: '21-30', text: '21-30' },
+				{ id: 4, value: '31+', text: '31+' },
 			],
 		}
 
 		total_risk = 0
 		mitigated_risk = 0
+		counter = 1
 
 		{% for finding in findings %}
 
@@ -228,16 +263,8 @@ DM22-1011
 				iskev = false
 			{% endif %}
 
-			{% if finding.mitigation == True %}
-				mitigated = true
-			{% else %}
-				mitigated = false
-			{% endif %}
-
 			total_risk += parseInt("{{finding.risk_score}}")
-			{% if finding.mitigation != True %}
-				mitigated_risk += parseInt("{{finding.risk_score}}")
-			{% endif %}
+			mitigated_risk += parseInt("{{finding.mitigated_risk_score}}")
 
 			{% if finding.likelihood == None %}
 				likelihood = ""
@@ -245,7 +272,15 @@ DM22-1011
 				likelihood = parseInt("{{finding.likelihood}}")
 			{% endif %}
 
-			data.scoreTableArgs.items.push({uploaded_finding_id: "{{finding.uploaded_finding_id}}", uploaded_finding_name: "{{finding.uploaded_finding_name}}", severity: "{{finding.severity}}", magnitude: "{{finding.magnitude|escapejs}}", likelihood: likelihood, default_likelihood: "{{finding.finding.default_likelihood}}", kev: iskev, mitigation: mitigated, risk_score: "{{finding.risk_score}}"})
+			{% if finding.duplicate_finding_order > 0 %}
+				label = " " + "{{finding.duplicate_finding_order}}".toString()
+			{% else %}
+				label = ""
+			{% endif %}
+
+			data.scoreTableArgs.items.push({order: counter.toString(), uploaded_finding_id: "{{finding.uploaded_finding_id}}", uploaded_finding_name: "{{finding.uploaded_finding_name}}" + label, severity: "{{finding.severity}}", magnitude: "{{finding.magnitude|escapejs}}", likelihood: likelihood, default_likelihood: "{{finding.finding.default_likelihood}}", kev: iskev, risk_score: "{{finding.risk_score}}", mitigated_score: "{{finding.mitigated_risk_score}}"})
+
+			counter++
 		{% endfor %}
 
 		data.totalTableArgs.items.push({total: total_risk, mitigated: mitigated_risk})
@@ -283,7 +318,7 @@ DM22-1011
 						headers: {"X-CSRFToken": document.getElementsByName("csrfmiddlewaretoken")[0].value}
 					}).then(response => {
 						if(response.ok) {
-							this.displayNotification({title: "Risk Score Saved", variant:"success", text: "Risk scoring data saved successfully.  Please wait while the page refreshes..."})
+							this.displayNotification({title: "Risk Score Saved", variant:"success", text: "Risk scoring data saved successfully. Please wait while the page refreshes..."})
 							setTimeout(() => {this.redirectLink("{% url 'risk_score' %}")}, 2000)
 						}
 						else {
