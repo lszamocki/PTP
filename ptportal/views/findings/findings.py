@@ -127,7 +127,10 @@ class UploadedFindingUpdateView(generic.edit.UpdateView):
         finding.save()
 
         for i in affected_systems_data:
-            if AffectedSystem.objects.filter(name=i['name']).exists():
+            if len(i['name']) == 0 or i['name'] == None or i['name'].isspace():
+                continue
+
+            elif AffectedSystem.objects.filter(name=i['name']).exists():
                 try:
                     obj = AffectedSystem.objects.get(name=i['name'])
                     affected_systems.append(obj)
@@ -278,7 +281,10 @@ class UploadedFindingCreateView(generic.edit.CreateView):
         kevs = []
 
         for i in affected_systems_data:
-            if AffectedSystem.objects.filter(name=i['name']).exists():
+            if len(i['name']) == 0 or i['name'] == None or i['name'].isspace():
+                continue
+
+            elif AffectedSystem.objects.filter(name=i['name']).exists():
                 try:
                     obj = AffectedSystem.objects.get(name=i['name'])
                     affected_systems.append(obj)
@@ -343,17 +349,21 @@ class UploadedFindingCreateView(generic.edit.CreateView):
             return HttpResponse(status=500)
 
         for sys in affected_systems_data:
-            try:
-                obj = AffectedSystem.objects.get(name=sys['name'])
-                mit = Mitigation.objects.create(
-                    system = obj,
-                    finding = finding,
-                    mitigation = sys['mitigation'],
-                    mitigation_date = sys['mitigation_date'] if sys['mitigation_date'] and sys['mitigation'] else None
-                )
-            except Exception as e:
-                print(e)
+            if len(sys['name']) == 0 or sys['name'] == None or sys['name'].isspace():
                 continue
+
+            else:
+                try:
+                    obj = AffectedSystem.objects.get(name=sys['name'])
+                    mit = Mitigation.objects.create(
+                        system = obj,
+                        finding = finding,
+                        mitigation = sys['mitigation'],
+                        mitigation_date = sys['mitigation_date'] if sys['mitigation_date'] and sys['mitigation'] else None
+                    )
+                except Exception as e:
+                    print(e)
+                    continue
         
         try:
             finding.KEV.add(*kevs)
