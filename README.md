@@ -96,8 +96,8 @@ Once `python` is successfully installed, run the following command to verify tha
 ## Getting Started
 
 ```bash
-> git clone https://github.com/cisagov/assessment-reporting-engine.git
-> cd assessment-reporting-engine
+> git clone https://github.com/lszamocki/PTP.git
+> cd PTP
 ```
 
 <a name='install-dependencies'></a>
